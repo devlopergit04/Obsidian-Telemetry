@@ -2,24 +2,22 @@ import React, { useEffect, useState } from 'react';
 import {
   Activity,
   AlertOctagon,
+  FileText,
   Network,
-  RotateCcw,
   Search,
   Server,
   Terminal,
   X,
 } from 'lucide-react';
-import { ClusterData, InspectorSelection, ScreenId } from '../types/telemetry';
+import type { ClusterSnapshot, InspectorSelection, ScreenId } from '../shared/types.ts';
 
 interface CommandPaletteProps {
   open: boolean;
   onClose: () => void;
-  clusters: ClusterData[];
-  activeCluster: ClusterData;
+  snapshot: ClusterSnapshot;
   onSelectScreen: (screen: ScreenId) => void;
-  onSelectCluster: (clusterId: string) => void;
+  onSelectContext: (contextName: string) => void;
   onInspect: (selection: InspectorSelection, targetScreen?: ScreenId) => void;
-  onResetWorkspace: () => void;
 }
 
 interface PaletteEntry {
@@ -34,12 +32,10 @@ interface PaletteEntry {
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
   open,
   onClose,
-  clusters,
-  activeCluster,
+  snapshot,
   onSelectScreen,
-  onSelectCluster,
+  onSelectContext,
   onInspect,
-  onResetWorkspace,
 }) => {
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -55,11 +51,36 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
   const entries: PaletteEntry[] = [
     ...[
-      { id: ScreenId.OVERVIEW, label: 'Go to Cluster Overview', icon: <Activity className="w-4 h-4 text-[#4cd7f6]" /> },
-      { id: ScreenId.NODES, label: 'Go to Nodes & Workloads', icon: <Server className="w-4 h-4 text-[#4cd7f6]" /> },
-      { id: ScreenId.LOGS, label: 'Go to Live Log Stream', icon: <Terminal className="w-4 h-4 text-[#4cd7f6]" /> },
-      { id: ScreenId.NETWORK, label: 'Go to Network Topology', icon: <Network className="w-4 h-4 text-[#4cd7f6]" /> },
-      { id: ScreenId.INCIDENTS, label: 'Go to Incidents & Alerts', icon: <AlertOctagon className="w-4 h-4 text-[#4cd7f6]" /> },
+      {
+        id: 'overview' as ScreenId,
+        label: 'Go to Cluster Overview',
+        icon: <Activity className="w-4 h-4 text-[#4cd7f6]" />,
+      },
+      {
+        id: 'nodes' as ScreenId,
+        label: 'Go to Nodes & Workloads',
+        icon: <Server className="w-4 h-4 text-[#4cd7f6]" />,
+      },
+      {
+        id: 'logs' as ScreenId,
+        label: 'Go to Container Logs',
+        icon: <Terminal className="w-4 h-4 text-[#4cd7f6]" />,
+      },
+      {
+        id: 'network' as ScreenId,
+        label: 'Go to Services & Ingress',
+        icon: <Network className="w-4 h-4 text-[#4cd7f6]" />,
+      },
+      {
+        id: 'incidents' as ScreenId,
+        label: 'Go to Incidents & PromQL',
+        icon: <AlertOctagon className="w-4 h-4 text-[#4cd7f6]" />,
+      },
+      {
+        id: 'audit' as ScreenId,
+        label: 'Go to Audit Trail',
+        icon: <FileText className="w-4 h-4 text-[#4cd7f6]" />,
+      },
     ]
       .filter((item) => item.label.toLowerCase().includes(q))
       .map((item) => ({
@@ -72,20 +93,20 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
           onClose();
         },
       })),
-    ...clusters
-      .filter((c) => c.name.toLowerCase().includes(q) || c.region.toLowerCase().includes(q))
+    ...snapshot.availableClusters
+      .filter((c) => c.name.toLowerCase().includes(q))
       .map((c) => ({
-        key: `cluster-${c.id}`,
-        section: 'Switch Cluster',
+        key: `ctx-${c.id}`,
+        section: 'Kubernetes Contexts',
         label: c.name,
-        meta: c.region,
+        meta: c.kubernetesStatus,
         icon: <Server className="w-3.5 h-3.5 text-emerald-400" />,
         action: () => {
-          onSelectCluster(c.id);
+          onSelectContext(c.contextName);
           onClose();
         },
       })),
-    ...activeCluster.nodes
+    ...snapshot.nodes
       .filter(
         (n) =>
           n.hostname.toLowerCase().includes(q) ||
@@ -95,16 +116,16 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       .slice(0, 5)
       .map((n) => ({
         key: `node-${n.id}`,
-        section: 'Cluster Nodes',
+        section: 'Nodes',
         label: n.hostname,
         meta: n.ip,
         icon: <Server className="w-3.5 h-3.5 text-[#4cd7f6]" />,
         action: () => {
-          onInspect({ kind: 'node', id: n.id }, ScreenId.NODES);
+          onInspect({ kind: 'node', id: n.id }, 'nodes');
           onClose();
         },
       })),
-    ...activeCluster.pods
+    ...snapshot.pods
       .filter(
         (p) =>
           p.name.toLowerCase().includes(q) ||
@@ -114,30 +135,15 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       .slice(0, 5)
       .map((p) => ({
         key: `pod-${p.id}`,
-        section: 'Pod Workloads',
+        section: 'Pods',
         label: p.name,
         meta: p.namespace,
         icon: <Terminal className="w-3.5 h-3.5 text-slate-400" />,
         action: () => {
-          onInspect({ kind: 'pod', id: p.id }, ScreenId.NODES);
+          onInspect({ kind: 'pod', id: p.id }, 'nodes');
           onClose();
         },
       })),
-    ...('reset workspace defaults restore'.includes(q) || q === ''
-      ? [
-          {
-            key: 'action-reset',
-            section: 'Workspace',
-            label: 'Reset Workspace to Default Cluster State',
-            meta: 'localStorage',
-            icon: <RotateCcw className="w-3.5 h-3.5 text-amber-400" />,
-            action: () => {
-              onResetWorkspace();
-              onClose();
-            },
-          },
-        ]
-      : []),
   ];
 
   useEffect(() => {
@@ -176,7 +182,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Jump to screen, cluster, node IP, or pod... (↑↓ Enter)"
+            placeholder="Search views, contexts, nodes, or pods... (↑↓ Enter)"
             className="flex-1 bg-transparent font-mono text-xs text-slate-100 placeholder:text-slate-500 focus:outline-none"
           />
           <button
@@ -191,7 +197,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
         <div className="max-h-[380px] overflow-y-auto micro-scroll p-2 space-y-1">
           {entries.length === 0 ? (
             <div className="py-8 text-center font-mono text-xs text-slate-500">
-              No matching cluster resources found for &ldquo;{query}&rdquo;
+              No matching resources found for &ldquo;{query}&rdquo;
             </div>
           ) : (
             entries.map((entry, idx) => {
@@ -220,9 +226,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <span className="truncate">{entry.label}</span>
                     </div>
                     {entry.meta && (
-                      <span className="text-[11px] text-[#4cd7f6] shrink-0 ml-2">
-                        {entry.meta}
-                      </span>
+                      <span className="text-[11px] text-[#4cd7f6] shrink-0 ml-2">{entry.meta}</span>
                     )}
                   </button>
                 </React.Fragment>

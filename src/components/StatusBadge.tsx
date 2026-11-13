@@ -1,11 +1,6 @@
 import React from 'react';
-import {
-  AlertTriangle,
-  CheckCircle2,
-  PauseCircle,
-  XOctagon,
-} from 'lucide-react';
-import { HealthStatus, IncidentSeverity } from '../types/telemetry';
+import { AlertTriangle, CheckCircle2, HelpCircle, PauseCircle, XOctagon } from 'lucide-react';
+import type { HealthStatus, IncidentSeverity } from '../shared/types.ts';
 
 interface StatusBadgeProps {
   status: HealthStatus | IncidentSeverity;
@@ -17,44 +12,49 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, compact = fals
     HealthStatus | IncidentSeverity,
     { classes: string; icon: React.ReactNode; label: string }
   > = {
-    [HealthStatus.HEALTHY]: {
+    HEALTHY: {
       classes: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
       icon: <CheckCircle2 className="w-3 h-3 shrink-0" />,
       label: 'HEALTHY',
     },
-    [HealthStatus.DEGRADED]: {
+    DEGRADED: {
       classes: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
       icon: <AlertTriangle className="w-3 h-3 shrink-0" />,
       label: 'DEGRADED',
     },
-    [HealthStatus.CRASHED]: {
+    CRASHED: {
       classes: 'bg-red-500/10 text-red-400 border-red-500/30',
       icon: <XOctagon className="w-3 h-3 shrink-0" />,
       label: 'CRASHED',
     },
-    [HealthStatus.CORDONED]: {
+    CORDONED: {
       classes: 'bg-slate-500/15 text-slate-300 border-slate-500/40',
       icon: <PauseCircle className="w-3 h-3 shrink-0" />,
       label: 'CORDONED',
     },
-    [IncidentSeverity.CRITICAL]: {
+    UNKNOWN: {
+      classes: 'bg-slate-600/15 text-slate-400 border-slate-600/40',
+      icon: <HelpCircle className="w-3 h-3 shrink-0" />,
+      label: 'UNKNOWN',
+    },
+    CRITICAL: {
       classes: 'bg-red-500/10 text-red-400 border-red-500/30',
       icon: <XOctagon className="w-3 h-3 shrink-0" />,
       label: 'CRITICAL',
     },
-    [IncidentSeverity.WARNING]: {
+    WARNING: {
       classes: 'bg-amber-500/10 text-amber-400 border-amber-500/30',
       icon: <AlertTriangle className="w-3 h-3 shrink-0" />,
       label: 'WARNING',
     },
-    [IncidentSeverity.RESOLVED]: {
+    RESOLVED: {
       classes: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30',
       icon: <CheckCircle2 className="w-3 h-3 shrink-0" />,
       label: 'RESOLVED',
     },
   };
 
-  const item = config[status];
+  const item = config[status] || config.UNKNOWN;
 
   return (
     <span

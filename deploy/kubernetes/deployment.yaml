@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: obsidian-telemetry
+  namespace: observability
+  labels:
+    app: obsidian-telemetry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: obsidian-telemetry
+  template:
+    metadata:
+      labels:
+        app: obsidian-telemetry
+    spec:
+      serviceAccountName: obsidian-telemetry
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: obsidian-telemetry
+          image: ghcr.io/obsidian-telemetry/obsidian-telemetry:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: '3000'
+            - name: KUBE_MODE
+              value: incluster
+            - name: AUTH_MODE
+              value: token
+            - name: ENABLE_POD_EXEC
+              value: 'false'
+            - name: ENABLE_DEMO_MODE
+              value: 'false'
+            - name: PROMETHEUS_URL
+              value: http://prometheus-operated.monitoring.svc.cluster.local:9090
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: obsidian-telemetry-secrets
+                  key: session-secret
+            - name: OBSIDIAN_ADMIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: obsidian-telemetry-secrets
+                  key: admin-token
+            - name: OBSIDIAN_OPERATOR_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: obsidian-telemetry-secrets
+                  key: operator-token
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ['ALL']
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: obsidian-telemetry
+  namespace: observability
+spec:
+  type: ClusterIP
+  selector:
+    app: obsidian-telemetry
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

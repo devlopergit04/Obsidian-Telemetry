@@ -1,13 +1,12 @@
 import React, { useId, useState } from 'react';
-import { TelemetryPoint } from '../types/telemetry';
+import type { TelemetryPoint } from '../shared/types.ts';
 
 interface MicroSparklineProps {
-  data: number[];
+  data: (number | null)[];
   timestamps?: string[];
   color?: string;
   height?: number;
   unit?: string;
-  onHoverIndex?: (index: number | null) => void;
 }
 
 export const MicroSparkline: React.FC<MicroSparklineProps> = ({
@@ -16,23 +15,33 @@ export const MicroSparkline: React.FC<MicroSparklineProps> = ({
   color = '#06B6D4',
   height = 42,
   unit = '%',
-  onHoverIndex,
 }) => {
   const gradientId = useId();
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
-  if (!data || data.length === 0) return null;
+  const numericValues = data.filter((v): v is number => v !== null && Number.isFinite(v));
+  if (numericValues.length === 0) {
+    return (
+      <div
+        style={{ height }}
+        className="w-full rounded bg-slate-950/50 border border-slate-800/60 flex items-center justify-center font-mono text-[10px] text-slate-500"
+      >
+        no series data
+      </div>
+    );
+  }
 
   const width = 220;
   const padY = 4;
-  const min = Math.min(...data);
-  const max = Math.max(...data);
+  const min = Math.min(...numericValues);
+  const max = Math.max(...numericValues);
   const range = max - min || 1;
 
-  const points = data.map((val, idx) => {
-    const x = (idx / Math.max(1, data.length - 1)) * width;
+  const normalized = data.map((v) => (v !== null ? v : numericValues[0]));
+  const points = normalized.map((val, idx) => {
+    const x = (idx / Math.max(1, normalized.length - 1)) * width;
     const y = height - padY - ((val - min) / range) * (height - padY * 2);
-    return { x, y, val };
+    return { x, y, val, isNull: data[idx] === null };
   });
 
   const linePath = points
@@ -43,14 +52,8 @@ export const MicroSparkline: React.FC<MicroSparklineProps> = ({
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const relX = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-    const idx = Math.round(relX * (data.length - 1));
+    const idx = Math.round(relX * (points.length - 1));
     setHoverIdx(idx);
-    onHoverIndex?.(idx);
-  };
-
-  const handleMouseLeave = () => {
-    setHoverIdx(null);
-    onHoverIndex?.(null);
   };
 
   const activePoint = hoverIdx !== null ? points[hoverIdx] : null;
@@ -63,7 +66,7 @@ export const MicroSparkline: React.FC<MicroSparklineProps> = ({
         className="w-full overflow-visible cursor-crosshair block"
         style={{ height }}
         onMouseMove={handleMouseMove}
-        onMouseLeave={handleMouseLeave}
+        onMouseLeave={() => setHoverIdx(null)}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
@@ -81,7 +84,7 @@ export const MicroSparkline: React.FC<MicroSparklineProps> = ({
           strokeLinecap="round"
           vectorEffect="non-scaling-stroke"
         />
-        {activePoint && (
+        {activePoint && !activePoint.isNull && (
           <>
             <line
               x1={activePoint.x}
@@ -109,8 +112,8 @@ export const MicroSparkline: React.FC<MicroSparklineProps> = ({
       {activePoint && hoverIdx !== null && (
         <div className="pointer-events-none absolute -top-6 right-0 rounded bg-[#111827]/95 border border-slate-700/90 px-1.5 py-0.5 font-mono text-[10px] text-[#dfe2ee] tabular-nums shadow-sm">
           {timestamps?.[hoverIdx] ? `${timestamps[hoverIdx]} · ` : ''}
-          <span style={{ color }}>{activePoint.val}</span>
-          {unit}
+          <span style={{ color }}>{activePoint.isNull ? 'n/a' : activePoint.val}</span>
+          {!activePoint.isNull ? unit : ''}
         </div>
       )}
     </div>
@@ -130,7 +133,7 @@ const METRIC_META: Record<
 > = {
   cpu: { label: 'CPU Load', color: '#06B6D4', unit: '%', maxDefault: 100 },
   memory: { label: 'Memory', color: '#10B981', unit: '%', maxDefault: 100 },
-  networkMbps: { label: 'Network I/O', color: '#4cd7f6', unit: 'Mbps', maxDefault: 3000 },
+  networkMbps: { label: 'Network I/O', color: '#4cd7f6', unit: 'Mbps', maxDefault: 2000 },
   p99LatencyMs: { label: 'P99 Latency', color: '#F59E0B', unit: 'ms', maxDefault: 80 },
 };
 
@@ -143,15 +146,15 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
 
   if (series.length === 0 || activeMetrics.length === 0) {
     return (
-      <div className="h-[230px] flex items-center justify-center text-xs font-mono text-slate-400">
-        Select at least one telemetry metric to plot.
+      <div className="h-[220px] flex items-center justify-center text-xs font-mono text-slate-400">
+        No time-series datapoints available for the selected metric or time window.
       </div>
     );
   }
 
   const width = 760;
   const height = 220;
-  const padLeft = 36;
+  const padLeft = 40;
   const padRight = 14;
   const padTop = 14;
   const padBottom = 26;
@@ -161,16 +164,21 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
   const primaryMetric = activeMetrics[0];
 
   const getNormalizedSeries = (metric: TelemetryMetricKey) => {
-    const vals = series.map((p) => p[metric]);
+    const vals = series
+      .map((p) => p[metric])
+      .filter((v): v is number => v !== null && Number.isFinite(v));
     const isPercent = metric === 'cpu' || metric === 'memory';
-    const maxVal = isPercent ? 100 : Math.max(METRIC_META[metric].maxDefault, ...vals) * 1.15;
-    const minVal = 0;
+    const maxVal = isPercent
+      ? 100
+      : Math.max(METRIC_META[metric].maxDefault, ...(vals.length ? vals : [0])) * 1.15;
 
     return series.map((pt, idx) => {
+      const raw = pt[metric];
+      const numeric = raw !== null && Number.isFinite(raw) ? raw : 0;
       const x = padLeft + (idx / Math.max(1, series.length - 1)) * plotW;
-      const ratio = (pt[metric] - minVal) / (maxVal - minVal || 1);
+      const ratio = numeric / (maxVal || 1);
       const y = padTop + plotH - ratio * plotH;
-      return { x, y, value: pt[metric], timestamp: pt.timestamp };
+      return { x, y, value: raw, timestamp: pt.timestamp };
     });
   };
 
@@ -183,20 +191,21 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
   };
 
   const yTicks = [0, 25, 50, 75, 100];
+  const primaryVals = series
+    .map((s) => s[primaryMetric])
+    .filter((v): v is number => v !== null && Number.isFinite(v));
   const primaryMax =
     primaryMetric === 'cpu' || primaryMetric === 'memory'
       ? 100
       : Math.round(
           Math.max(
             METRIC_META[primaryMetric].maxDefault,
-            ...series.map((s) => s[primaryMetric])
+            ...(primaryVals.length ? primaryVals : [0])
           ) * 1.15
         );
 
   const hoverX =
-    hoverIdx !== null
-      ? padLeft + (hoverIdx / Math.max(1, series.length - 1)) * plotW
-      : null;
+    hoverIdx !== null ? padLeft + (hoverIdx / Math.max(1, series.length - 1)) * plotW : null;
 
   return (
     <div className="relative w-full">
@@ -208,21 +217,13 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
       >
         <defs>
           {activeMetrics.map((metric) => (
-            <linearGradient
-              key={metric}
-              id={`${baseId}-${metric}`}
-              x1="0"
-              y1="0"
-              x2="0"
-              y2="1"
-            >
+            <linearGradient key={metric} id={`${baseId}-${metric}`} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stopColor={METRIC_META[metric].color} stopOpacity="0.18" />
               <stop offset="100%" stopColor={METRIC_META[metric].color} stopOpacity="0.0" />
             </linearGradient>
           ))}
         </defs>
 
-        {/* Horizontal grid lines */}
         {yTicks.map((tick) => {
           const y = padTop + plotH - (tick / 100) * plotH;
           const labelValue = Math.round((tick / 100) * primaryMax);
@@ -249,12 +250,11 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
           );
         })}
 
-        {/* Vertical timestamp grid markers */}
         {series.map((pt, idx) => {
           if (idx % 3 !== 0 && idx !== series.length - 1) return null;
           const x = padLeft + (idx / Math.max(1, series.length - 1)) * plotW;
           return (
-            <g key={pt.timestamp}>
+            <g key={`${pt.timestamp}-${idx}`}>
               <line
                 x1={x}
                 x2={x}
@@ -275,7 +275,6 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
           );
         })}
 
-        {/* Metric paths */}
         {activeMetrics.map((metric) => {
           const pts = getNormalizedSeries(metric);
           const line = pts
@@ -294,7 +293,7 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
                 strokeLinejoin="round"
                 strokeLinecap="round"
               />
-              {hoverIdx !== null && pts[hoverIdx] && (
+              {hoverIdx !== null && pts[hoverIdx] && pts[hoverIdx].value !== null && (
                 <circle
                   cx={pts[hoverIdx].x}
                   cy={pts[hoverIdx].y}
@@ -308,7 +307,6 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
           );
         })}
 
-        {/* Hover crosshair */}
         {hoverX !== null && (
           <line
             x1={hoverX}
@@ -323,22 +321,23 @@ export const TelemetryAreaChart: React.FC<TelemetryAreaChartProps> = ({
         )}
       </svg>
 
-      {/* Crosshair Readout Flyout */}
       {hoverIdx !== null && series[hoverIdx] && (
         <div className="absolute top-2 right-3 glass-flyout rounded px-3 py-2 text-[11px] font-mono pointer-events-none shadow-lg">
           <div className="text-slate-400 mb-1 border-b border-slate-700/80 pb-1">
             {series[hoverIdx].timestamp} UTC
           </div>
           <div className="space-y-0.5 tabular-nums">
-            {activeMetrics.map((m) => (
-              <div key={m} className="flex items-center justify-between gap-4">
-                <span className="text-slate-300">{METRIC_META[m].label}</span>
-                <span style={{ color: METRIC_META[m].color }} className="font-semibold">
-                  {series[hoverIdx][m]}
-                  {METRIC_META[m].unit}
-                </span>
-              </div>
-            ))}
+            {activeMetrics.map((m) => {
+              const v = series[hoverIdx][m];
+              return (
+                <div key={m} className="flex items-center justify-between gap-4">
+                  <span className="text-slate-300">{METRIC_META[m].label}</span>
+                  <span style={{ color: METRIC_META[m].color }} className="font-semibold">
+                    {v === null ? 'n/a' : `${v}${METRIC_META[m].unit}`}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

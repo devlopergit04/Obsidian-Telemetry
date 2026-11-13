@@ -1,49 +1,56 @@
 import React from 'react';
-import {
-  Command,
-  Menu,
-  PanelRightClose,
-  PanelRightOpen,
-  Pause,
-  Play,
-  Plus,
-} from 'lucide-react';
-import { ClusterData, ScreenId } from '../types/telemetry';
+import { Command, KeyRound, Menu, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
+import type { AuthSession, ClusterSummary, DataSourceMode, ScreenId } from '../shared/types.ts';
 
 interface TopBarProps {
-  cluster: ClusterData;
+  cluster: ClusterSummary;
+  sourceMode: DataSourceMode;
   activeScreen: ScreenId;
-  isLive: boolean;
-  onToggleLive: () => void;
+  session: AuthSession;
+  mode: 'live' | 'demo';
+  onToggleMode: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
   onOpenCommandPalette: () => void;
-  onOpenDeployModal: () => void;
+  onOpenAuthModal: () => void;
   drawerOpen: boolean;
   onToggleDrawer: () => void;
   onOpenMobileNav: () => void;
 }
 
 const SCREEN_TITLES: Record<ScreenId, string> = {
-  [ScreenId.OVERVIEW]: 'Cluster Overview',
-  [ScreenId.NODES]: 'Nodes & Workloads',
-  [ScreenId.LOGS]: 'Live Log Stream',
-  [ScreenId.NETWORK]: 'Network Topology',
-  [ScreenId.INCIDENTS]: 'Incidents & Alerts',
+  overview: 'Cluster Overview',
+  nodes: 'Nodes & Workloads',
+  logs: 'Container Logs',
+  network: 'Services & Ingress',
+  incidents: 'Incidents & PromQL',
+  audit: 'Audit Trail',
 };
 
 export const TopBar: React.FC<TopBarProps> = ({
   cluster,
+  sourceMode,
   activeScreen,
-  isLive,
-  onToggleLive,
+  session,
+  mode,
+  onToggleMode,
+  onRefresh,
+  refreshing,
   onOpenCommandPalette,
-  onOpenDeployModal,
+  onOpenAuthModal,
   drawerOpen,
   onToggleDrawer,
   onOpenMobileNav,
 }) => {
+  const modePill =
+    sourceMode === 'live'
+      ? { label: 'LIVE INFRA', cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' }
+      : sourceMode === 'demo'
+        ? { label: 'DEMO DATA', cls: 'bg-amber-500/15 text-amber-300 border-amber-500/40' }
+        : { label: 'DISCONNECTED', cls: 'bg-slate-800/80 text-slate-300 border-slate-700' };
+
   return (
     <header className="h-14 shrink-0 border-b border-slate-800/80 bg-[#0a0e16]/85 backdrop-blur-md px-4 lg:px-6 flex items-center justify-between gap-4">
-      {/* Left: Mobile Trigger + Contextual Breadcrumbs */}
       <div className="flex items-center gap-3 min-w-0">
         <button
           onClick={onOpenMobileNav}
@@ -68,56 +75,58 @@ export const TopBar: React.FC<TopBarProps> = ({
         </nav>
       </div>
 
-      {/* Right: Stream Control + Command Palette + Primary Action + Drawer Toggle */}
-      <div className="flex items-center gap-2.5 shrink-0">
-        {/* Live Telemetry Toggle */}
-        <button
-          onClick={onToggleLive}
-          className={`flex items-center gap-2 px-3 py-1.5 rounded text-xs font-mono border transition-colors whitespace-nowrap shrink-0 ${
-            isLive
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30 hover:bg-emerald-500/15'
-              : 'bg-slate-900/70 text-slate-300 border-slate-800 hover:border-slate-700'
-          }`}
-          title={isLive ? 'Pause live telemetry stream' : 'Resume live telemetry stream'}
+      <div className="flex items-center gap-2 shrink-0">
+        <span
+          className={`hidden sm:inline-flex items-center px-2.5 py-1 rounded-full border font-mono text-[10px] uppercase tracking-[0.06em] whitespace-nowrap ${modePill.cls}`}
         >
-          {isLive ? (
-            <span className="relative flex h-2 w-2 shrink-0">
-              <span className="telemetry-beacon-ring absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400" />
-            </span>
-          ) : (
-            <Play className="w-3 h-3 text-slate-400" />
-          )}
-          <span className="hidden sm:inline">{isLive ? 'LIVE STREAM' : 'PAUSED'}</span>
-          {isLive && <Pause className="w-3 h-3 opacity-70 hidden sm:inline" />}
-        </button>
+          {modePill.label}
+        </span>
 
-        {/* Command Palette Trigger */}
+        {session.demoModeEnabled && (
+          <button
+            onClick={onToggleMode}
+            className="px-2.5 py-1.5 rounded bg-slate-900/80 border border-slate-700 font-mono text-[11px] text-slate-200 hover:border-[#06B6D4]/50 transition-colors whitespace-nowrap"
+          >
+            {mode === 'demo' ? 'Switch to Live' : 'Demo Mode'}
+          </button>
+        )}
+
         <button
           onClick={onOpenCommandPalette}
           className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-400 hover:text-slate-200 hover:border-[#06B6D4]/50 transition-colors whitespace-nowrap shrink-0"
         >
           <Command className="w-3.5 h-3.5 text-[#4cd7f6]" />
-          <span>Search nodes, logs...</span>
+          <span>Search</span>
           <kbd className="px-1.5 py-0.5 text-[10px] rounded bg-slate-800/80 text-slate-300 border border-slate-700">
             ⌘K
           </kbd>
         </button>
 
-        {/* Primary Action */}
         <button
-          onClick={onOpenDeployModal}
-          className="flex items-center gap-1.5 px-3.5 py-1.5 rounded bg-[#06B6D4] text-[#0B0F17] font-medium text-xs hover:bg-[#22D3EE] hover:shadow-[0_0_12px_rgba(6,182,212,0.4)] transition-all whitespace-nowrap shrink-0"
+          onClick={onOpenAuthModal}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded border text-xs font-mono transition-colors whitespace-nowrap shrink-0 ${
+            session.authenticated
+              ? 'bg-[#1E293B] border-[#06B6D4]/40 text-[#4cd7f6]'
+              : 'bg-slate-900/70 border-slate-800 text-slate-300 hover:border-slate-700'
+          }`}
         >
-          <Plus className="w-3.5 h-3.5 stroke-[2.5]" />
-          <span>Deploy Manifest</span>
+          <KeyRound className="w-3.5 h-3.5" />
+          <span className="uppercase">{session.role}</span>
         </button>
 
-        {/* Inspector Drawer Toggle */}
+        <button
+          onClick={onRefresh}
+          disabled={refreshing}
+          aria-label="Refresh cluster snapshot"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-[#06B6D4] text-[#0B0F17] font-medium text-xs hover:bg-[#22D3EE] transition-all whitespace-nowrap shrink-0 disabled:opacity-60"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          <span className="hidden sm:inline">Refresh</span>
+        </button>
+
         <button
           onClick={onToggleDrawer}
           aria-label={drawerOpen ? 'Hide telemetry inspector' : 'Show telemetry inspector'}
-          title={drawerOpen ? 'Hide telemetry inspector' : 'Show telemetry inspector'}
           className={`p-2 rounded border transition-colors shrink-0 ${
             drawerOpen
               ? 'bg-[#1E293B] border-[#06B6D4]/40 text-[#4cd7f6]'

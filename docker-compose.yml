@@ -1,0 +1,40 @@
+services:
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: obsidian-prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=24h
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+    restart: unless-stopped
+
+  obsidian-telemetry:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: obsidian-telemetry
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      CORS_ORIGIN: http://localhost:3000
+      AUTH_MODE: token
+      SESSION_SECRET: ${SESSION_SECRET:-change-me-32-byte-random-secret-key}
+      OBSIDIAN_ADMIN_TOKEN: ${OBSIDIAN_ADMIN_TOKEN:-change-me-admin-token}
+      OBSIDIAN_OPERATOR_TOKEN: ${OBSIDIAN_OPERATOR_TOKEN:-change-me-operator-token}
+      OBSIDIAN_VIEWER_TOKEN: ${OBSIDIAN_VIEWER_TOKEN:-change-me-viewer-token}
+      KUBE_MODE: ${KUBE_MODE:-kubeconfig}
+      KUBECONFIG_PATH: /home/obsidian/.kube/config
+      PROMETHEUS_URL: http://prometheus:9090
+      ENABLE_POD_EXEC: 'false'
+      ENABLE_DEMO_MODE: 'true'
+    # Mount your local kubeconfig read-only if connecting to an external cluster:
+    # volumes:
+    #   - ${HOME}/.kube/config:/home/obsidian/.kube/config:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped

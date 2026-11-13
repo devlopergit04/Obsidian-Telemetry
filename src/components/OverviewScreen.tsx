@@ -1,60 +1,37 @@
 import React, { useState } from 'react';
-import { ArrowUpRight, RefreshCw } from 'lucide-react';
-import {
-  ClusterData,
-  HealthStatus,
-  InspectorSelection,
-  ScreenId,
-  TimeWindow,
-} from '../types/telemetry';
-import {
-  MicroSparkline,
-  TelemetryAreaChart,
-  TelemetryMetricKey,
-} from './Sparkline';
-import { StatusBadge } from './StatusBadge';
+import { AlertTriangle, ArrowUpRight, ServerCrash } from 'lucide-react';
+import type { ClusterSnapshot, InspectorSelection, ScreenId, TimeWindow } from '../shared/types.ts';
+import { MicroSparkline, TelemetryAreaChart, type TelemetryMetricKey } from './Sparkline.tsx';
+import { StatusBadge } from './StatusBadge.tsx';
 
 interface OverviewScreenProps {
-  cluster: ClusterData;
+  snapshot: ClusterSnapshot;
   timeWindow: TimeWindow;
   onChangeTimeWindow: (tw: TimeWindow) => void;
   selectedInspector: InspectorSelection | null;
   onInspect: (selection: InspectorSelection) => void;
   onNavigateScreen: (screen: ScreenId) => void;
-  onRefreshMetrics: () => void;
+  onEnableDemoMode: () => void;
+  demoModeEnabled: boolean;
 }
 
 export const OverviewScreen: React.FC<OverviewScreenProps> = ({
-  cluster,
+  snapshot,
   timeWindow,
   onChangeTimeWindow,
   selectedInspector,
   onInspect,
   onNavigateScreen,
-  onRefreshMetrics,
+  onEnableDemoMode,
+  demoModeEnabled,
 }) => {
-  const [activeMetrics, setActiveMetrics] = useState<TelemetryMetricKey[]>([
-    'cpu',
-    'memory',
-  ]);
+  const [activeMetrics, setActiveMetrics] = useState<TelemetryMetricKey[]>(['cpu', 'memory']);
 
-  const series = cluster.telemetrySeries;
-  const latest = series[series.length - 1] || {
-    timestamp: '04:28:00',
-    cpu: 0,
-    memory: 0,
-    networkMbps: 0,
-    p99LatencyMs: 0,
-  };
+  const { cluster, nodes, pods, telemetry } = snapshot;
+  const series = telemetry.series;
   const timestamps = series.map((s) => s.timestamp);
-
-  const healthyNodesCount = cluster.nodes.filter(
-    (n) => n.status === HealthStatus.HEALTHY
-  ).length;
-  const totalPods = cluster.pods.length;
-  const crashedPods = cluster.pods.filter(
-    (p) => p.status === HealthStatus.CRASHED
-  ).length;
+  const healthyNodesCount = nodes.filter((n) => n.status === 'HEALTHY').length;
+  const crashedPodsCount = pods.filter((p) => p.status === 'CRASHED').length;
 
   const toggleMetric = (metric: TelemetryMetricKey) => {
     setActiveMetrics((prev) => {
@@ -65,82 +42,147 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
     });
   };
 
+  if (snapshot.sourceMode === 'disconnected' && nodes.length === 0) {
+    return (
+      <div className="space-y-5">
+        <div>
+          <h1 className="font-display text-xl font-semibold tracking-tight text-[#dfe2ee]">
+            Cluster Infrastructure Disconnected
+          </h1>
+          <p className="font-mono text-xs text-slate-400 mt-1">
+            No active Kubernetes API or Prometheus data source is connected.
+          </p>
+        </div>
+
+        <div className="glass-panel rounded p-6 space-y-4">
+          <div className="flex items-start gap-3">
+            <ServerCrash className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-2 text-xs font-mono">
+              <div className="text-[#dfe2ee] font-semibold">
+                {cluster.kubernetesError || 'Kubernetes connection not configured.'}
+              </div>
+              {cluster.prometheusError && (
+                <div className="text-slate-400">Prometheus: {cluster.prometheusError}</div>
+              )}
+              <div className="text-slate-400 leading-relaxed pt-1">
+                Configure <code className="text-[#4cd7f6]">KUBECONFIG_PATH</code> or{' '}
+                <code className="text-[#4cd7f6]">K8S_API_SERVER</code> +{' '}
+                <code className="text-[#4cd7f6]">K8S_BEARER_TOKEN</code> and{' '}
+                <code className="text-[#4cd7f6]">PROMETHEUS_URL</code> in your environment to view
+                real infrastructure telemetry.
+              </div>
+            </div>
+          </div>
+
+          {demoModeEnabled && (
+            <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-4">
+              <span className="font-mono text-[11px] text-slate-400">
+                Want to explore the interface with clearly labeled synthetic data?
+              </span>
+              <button
+                onClick={onEnableDemoMode}
+                className="px-3.5 py-2 rounded bg-[#06B6D4] text-[#0B0F17] text-xs font-medium hover:bg-[#22D3EE] whitespace-nowrap"
+              >
+                Load Demo Sandbox
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  const fmt = (val: number | null, suffix: string) =>
+    val !== null ? `${val}${suffix}` : 'Unavailable';
+
   const kpiCards = [
     {
       label: 'Cluster CPU Load',
-      value: `${latest.cpu.toFixed(1)}%`,
-      meta: `${cluster.nodes.length} nodes · ${healthyNodesCount} healthy`,
+      value: fmt(telemetry.current.cpuPercent, '%'),
+      meta: `${nodes.length} nodes · ${healthyNodesCount} healthy`,
       data: series.map((s) => s.cpu),
-      color: latest.cpu > 80 ? '#F59E0B' : '#06B6D4',
+      color:
+        telemetry.current.cpuPercent !== null && telemetry.current.cpuPercent > 80
+          ? '#F59E0B'
+          : '#06B6D4',
       unit: '%',
     },
     {
       label: 'Memory Allocation',
-      value: `${latest.memory.toFixed(1)}%`,
-      meta: `${totalPods} active pods · ${crashedPods} crashed`,
+      value: fmt(telemetry.current.memoryPercent, '%'),
+      meta: `${pods.length} pods · ${crashedPodsCount} crashed`,
       data: series.map((s) => s.memory),
       color: '#10B981',
       unit: '%',
     },
     {
-      label: 'Ingress Throughput',
-      value: `${latest.networkMbps.toLocaleString()} Mbps`,
-      meta: `${cluster.ingressRoutes.length} active routes`,
+      label: 'Network Throughput',
+      value:
+        telemetry.current.networkMbps !== null
+          ? `${telemetry.current.networkMbps.toLocaleString()} Mbps`
+          : 'Unavailable',
+      meta: `${snapshot.services.length} services · ${snapshot.ingresses.length} ingresses`,
       data: series.map((s) => s.networkMbps),
       color: '#4cd7f6',
       unit: ' Mbps',
     },
     {
-      label: 'P99 Gateway Latency',
-      value: `${latest.p99LatencyMs.toFixed(1)} ms`,
-      meta: `${cluster.region}`,
+      label: 'P99 HTTP Latency',
+      value: fmt(telemetry.current.p99LatencyMs, ' ms'),
+      meta:
+        telemetry.status === 'connected'
+          ? 'Source: Prometheus'
+          : telemetry.status === 'demo'
+            ? 'Source: Demo Sandbox'
+            : 'Prometheus disconnected',
       data: series.map((s) => s.p99LatencyMs),
-      color: latest.p99LatencyMs > 25 ? '#F59E0B' : '#10B981',
+      color:
+        telemetry.current.p99LatencyMs !== null && telemetry.current.p99LatencyMs > 50
+          ? '#F59E0B'
+          : '#10B981',
       unit: ' ms',
     },
   ];
 
+  const clusterOverallStatus = nodes.some((n) => n.status === 'CRASHED')
+    ? 'CRASHED'
+    : nodes.some((n) => n.status === 'DEGRADED')
+      ? 'DEGRADED'
+      : nodes.length > 0
+        ? 'HEALTHY'
+        : 'UNKNOWN';
+
   return (
     <div className="space-y-5">
-      {/* Cluster Identity Summary Row */}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="font-display text-xl font-semibold tracking-tight text-[#dfe2ee]">
               {cluster.name}
             </h1>
-            <StatusBadge status={cluster.status} />
+            <StatusBadge status={clusterOverallStatus} />
           </div>
           <p className="font-mono text-xs text-slate-400 mt-1">
-            {cluster.provider} · {cluster.region} · VPC {cluster.vpcCidr}
+            {cluster.serverDisplay} · {cluster.k8sVersion} · {snapshot.deployments.length}{' '}
+            deployments · {snapshot.statefulSets.length} statefulsets · {snapshot.daemonSets.length}{' '}
+            daemonsets
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          {/* Time Window Segmented Switch */}
-          <div className="inline-flex items-center rounded bg-[#0a0e16] border border-slate-800/90 p-0.5">
-            {(['15m', '1h', '6h', '24h'] as TimeWindow[]).map((tw) => (
-              <button
-                key={tw}
-                onClick={() => onChangeTimeWindow(tw)}
-                className={`px-2.5 py-1 rounded-xs font-mono text-[11px] transition-colors ${
-                  timeWindow === tw
-                    ? 'bg-[#1E293B] text-[#4cd7f6] font-semibold'
-                    : 'text-slate-400 hover:text-slate-200'
-                }`}
-              >
-                {tw}
-              </button>
-            ))}
-          </div>
-
-          <button
-            onClick={onRefreshMetrics}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded bg-slate-900/70 border border-slate-800 text-xs font-mono text-slate-200 hover:border-[#06B6D4]/50 hover:bg-slate-800/80 transition-colors whitespace-nowrap"
-          >
-            <RefreshCw className="w-3.5 h-3.5 text-[#4cd7f6]" />
-            <span>Sample</span>
-          </button>
+        <div className="inline-flex items-center rounded bg-[#0a0e16] border border-slate-800/90 p-0.5">
+          {(['15m', '1h', '6h', '24h'] as TimeWindow[]).map((tw) => (
+            <button
+              key={tw}
+              onClick={() => onChangeTimeWindow(tw)}
+              className={`px-2.5 py-1 rounded-xs font-mono text-[11px] transition-colors ${
+                timeWindow === tw
+                  ? 'bg-[#1E293B] text-[#4cd7f6] font-semibold'
+                  : 'text-slate-400 hover:text-slate-200'
+              }`}
+            >
+              {tw}
+            </button>
+          ))}
         </div>
       </div>
 
@@ -152,11 +194,9 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
             className="glass-panel rounded p-4 flex flex-col justify-between gap-3"
           >
             <div>
-              <div className="flex items-center justify-between gap-2">
-                <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-slate-400">
-                  {card.label}
-                </span>
-              </div>
+              <span className="font-mono text-[10px] uppercase tracking-[0.08em] text-slate-400">
+                {card.label}
+              </span>
               <div className="font-mono text-2xl font-bold text-[#dfe2ee] tabular-nums mt-1.5">
                 {card.value}
               </div>
@@ -175,15 +215,16 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
         ))}
       </div>
 
-      {/* Main Multi-Metric Telemetry Chart */}
+      {/* Prometheus Telemetry Area Chart */}
       <section className="glass-panel rounded p-4">
         <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
           <div>
             <h2 className="font-display text-sm font-semibold text-[#dfe2ee]">
-              Cluster Telemetry Stream
+              Prometheus Time-Series Telemetry
             </h2>
             <p className="font-mono text-[11px] text-slate-400">
-              Window: {timeWindow} · Hover chart to snap coordinates across UTC grid
+              Window: {timeWindow} · Status: {telemetry.status.toUpperCase()}
+              {telemetry.error ? ` — ${telemetry.error}` : ''}
             </p>
           </div>
 
@@ -218,25 +259,36 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
           </div>
         </div>
 
-        <TelemetryAreaChart series={series} activeMetrics={activeMetrics} />
+        {telemetry.status === 'disconnected' || telemetry.status === 'error' ? (
+          <div className="h-[200px] rounded border border-slate-800/80 bg-[#0a0e16]/70 flex flex-col items-center justify-center p-6 text-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-amber-400" />
+            <div className="font-mono text-xs text-[#dfe2ee]">Prometheus Telemetry Unavailable</div>
+            <p className="font-mono text-[11px] text-slate-400 max-w-lg">
+              {telemetry.error ||
+                'Configure PROMETHEUS_URL in your server environment to query historical and live PromQL metrics.'}
+            </p>
+          </div>
+        ) : (
+          <TelemetryAreaChart series={series} activeMetrics={activeMetrics} />
+        )}
       </section>
 
-      {/* Active Node Matrix Table */}
+      {/* Active Node Matrix */}
       <section className="glass-panel rounded overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-800/80 flex items-center justify-between gap-2">
           <div>
             <h2 className="font-display text-sm font-semibold text-[#dfe2ee]">
-              Active Node Matrix
+              Cluster Node Inventory ({nodes.length})
             </h2>
             <p className="font-mono text-[11px] text-slate-400">
-              Select any node row to inspect kernel metrics, pods, and exec console
+              Select any node to inspect conditions, pods, and Kubernetes YAML
             </p>
           </div>
           <button
-            onClick={() => onNavigateScreen(ScreenId.NODES)}
+            onClick={() => onNavigateScreen('nodes')}
             className="flex items-center gap-1 font-mono text-xs text-[#4cd7f6] hover:underline whitespace-nowrap shrink-0"
           >
-            <span>Manage Fleet</span>
+            <span>Manage Workloads</span>
             <ArrowUpRight className="w-3.5 h-3.5" />
           </button>
         </div>
@@ -246,7 +298,7 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
             <thead>
               <tr className="bg-[#111827]/90 border-b border-slate-800/90 font-mono text-[10px] uppercase tracking-[0.08em] text-slate-400">
                 <th className="py-2.5 px-4 font-semibold">Hostname</th>
-                <th className="py-2.5 px-3 font-semibold">IP / CIDR</th>
+                <th className="py-2.5 px-3 font-semibold">IP / Pod CIDR</th>
                 <th className="py-2.5 px-3 font-semibold">Zone</th>
                 <th className="py-2.5 px-3 font-semibold text-right">CPU</th>
                 <th className="py-2.5 px-3 font-semibold text-right">Memory</th>
@@ -255,79 +307,49 @@ export const OverviewScreen: React.FC<OverviewScreenProps> = ({
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60 font-mono text-xs">
-              {cluster.nodes.map((node) => {
-                const isSelected =
-                  selectedInspector?.kind === 'node' &&
-                  selectedInspector.id === node.id;
+              {nodes.length === 0 ? (
+                <tr>
+                  <td colSpan={7} className="py-8 text-center text-slate-400">
+                    No Kubernetes nodes discovered in this context.
+                  </td>
+                </tr>
+              ) : (
+                nodes.map((node) => {
+                  const isSelected =
+                    selectedInspector?.kind === 'node' && selectedInspector.id === node.id;
 
-                return (
-                  <tr
-                    key={node.id}
-                    onClick={() => onInspect({ kind: 'node', id: node.id })}
-                    className={`cursor-pointer transition-colors h-11 ${
-                      isSelected
-                        ? 'bg-[#1E293B]/90'
-                        : 'hover:bg-slate-900/60'
-                    }`}
-                  >
-                    <td className="py-2 px-4 text-[#dfe2ee] font-medium whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        {isSelected && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-[#22D3EE]" />
-                        )}
-                        <span>{node.hostname}</span>
-                      </div>
-                    </td>
-                    <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
-                      <div>{node.ip}</div>
-                      <div className="text-[10px] text-slate-500">{node.podCidr}</div>
-                    </td>
-                    <td className="py-2 px-3 text-slate-400 whitespace-nowrap">{node.zone}</td>
-                    <td className="py-2 px-3 text-right tabular-nums whitespace-nowrap">
-                      <div className="inline-flex items-center gap-2">
-                        <div className="w-14 h-1.5 rounded-xs bg-slate-800 overflow-hidden">
-                          <div
-                            className={`h-full ${
-                              node.cpuPercent > 85
-                                ? 'bg-red-400'
-                                : node.cpuPercent > 70
-                                ? 'bg-amber-400'
-                                : 'bg-[#06B6D4]'
-                            }`}
-                            style={{ width: `${node.cpuPercent}%` }}
-                          />
-                        </div>
-                        <span className="w-11 text-right text-slate-200">
-                          {node.cpuPercent.toFixed(1)}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2 px-3 text-right tabular-nums whitespace-nowrap">
-                      <div className="inline-flex items-center gap-2">
-                        <div className="w-14 h-1.5 rounded-xs bg-slate-800 overflow-hidden">
-                          <div
-                            className={`h-full ${
-                              node.memoryPercent > 88
-                                ? 'bg-amber-400'
-                                : 'bg-emerald-400'
-                            }`}
-                            style={{ width: `${node.memoryPercent}%` }}
-                          />
-                        </div>
-                        <span className="w-11 text-right text-slate-200">
-                          {node.memoryPercent.toFixed(1)}%
-                        </span>
-                      </div>
-                    </td>
-                    <td className="py-2 px-3 text-right text-slate-300 tabular-nums whitespace-nowrap">
-                      {node.podCount}/{node.podCapacity}
-                    </td>
-                    <td className="py-2 px-4 text-right whitespace-nowrap">
-                      <StatusBadge status={node.status} compact />
-                    </td>
-                  </tr>
-                );
-              })}
+                  return (
+                    <tr
+                      key={node.id}
+                      onClick={() => onInspect({ kind: 'node', id: node.id })}
+                      className={`cursor-pointer transition-colors h-11 ${
+                        isSelected ? 'bg-[#1E293B]/90' : 'hover:bg-slate-900/60'
+                      }`}
+                    >
+                      <td className="py-2 px-4 text-[#dfe2ee] font-medium whitespace-nowrap">
+                        {node.hostname}
+                      </td>
+                      <td className="py-2 px-3 text-slate-300 whitespace-nowrap">
+                        <div>{node.ip}</div>
+                        <div className="text-[10px] text-slate-500">{node.podCidr}</div>
+                      </td>
+                      <td className="py-2 px-3 text-slate-400 whitespace-nowrap">{node.zone}</td>
+                      <td className="py-2 px-3 text-right tabular-nums whitespace-nowrap text-slate-200">
+                        {node.cpuPercent !== null ? `${node.cpuPercent.toFixed(1)}%` : 'n/a'}
+                      </td>
+                      <td className="py-2 px-3 text-right tabular-nums whitespace-nowrap text-slate-200">
+                        {node.memoryPercent !== null ? `${node.memoryPercent.toFixed(1)}%` : 'n/a'}
+                      </td>
+                      <td className="py-2 px-3 text-right text-slate-300 tabular-nums whitespace-nowrap">
+                        {node.podCount}/{node.podCapacity}
+                      </td>
+                      <td className="py-2 px-4 text-right whitespace-nowrap">
+                        <StatusBadge status={node.status} compact />
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>

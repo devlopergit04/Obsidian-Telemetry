@@ -1,8 +1,14 @@
 node_modules/
 build/
 dist/
+dist-server/
 coverage/
 .DS_Store
 *.log
-.env*
+.env
+.env.*
 !.env.example
+*kubeconfig*
+*.pem
+*.key
+*.crt

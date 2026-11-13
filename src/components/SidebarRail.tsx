@@ -4,21 +4,23 @@ import {
   AlertOctagon,
   ChevronLeft,
   ChevronRight,
+  FileText,
   Network,
   Server,
   Terminal,
   X,
 } from 'lucide-react';
-import { ClusterData, IncidentSeverity, ScreenId } from '../types/telemetry';
+import type { ClusterSummary, ScreenId } from '../shared/types.ts';
 
 interface SidebarRailProps {
   activeScreen: ScreenId;
   onSelectScreen: (screen: ScreenId) => void;
   collapsed: boolean;
   onToggleCollapse: () => void;
-  clusters: ClusterData[];
-  activeClusterId: string;
-  onSelectCluster: (clusterId: string) => void;
+  clusters: ClusterSummary[];
+  activeCluster: ClusterSummary;
+  onSelectContext: (contextName: string) => void;
+  openIncidentsCount: number;
   mobileOpen: boolean;
   onCloseMobile: () => void;
 }
@@ -29,16 +31,12 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
   collapsed,
   onToggleCollapse,
   clusters,
-  activeClusterId,
-  onSelectCluster,
+  activeCluster,
+  onSelectContext,
+  openIncidentsCount,
   mobileOpen,
   onCloseMobile,
 }) => {
-  const activeCluster = clusters.find((c) => c.id === activeClusterId) || clusters[0];
-  const openIncidentsCount = activeCluster.incidents.filter(
-    (inc) => inc.severity !== IncidentSeverity.RESOLVED
-  ).length;
-
   const navItems: {
     id: ScreenId;
     label: string;
@@ -46,30 +44,35 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
     badge?: number;
   }[] = [
     {
-      id: ScreenId.OVERVIEW,
+      id: 'overview',
       label: 'Cluster Overview',
       icon: <Activity className="w-4 h-4 shrink-0" />,
     },
     {
-      id: ScreenId.NODES,
+      id: 'nodes',
       label: 'Nodes & Workloads',
       icon: <Server className="w-4 h-4 shrink-0" />,
     },
     {
-      id: ScreenId.LOGS,
-      label: 'Live Log Stream',
+      id: 'logs',
+      label: 'Container Logs',
       icon: <Terminal className="w-4 h-4 shrink-0" />,
     },
     {
-      id: ScreenId.NETWORK,
-      label: 'Network Topology',
+      id: 'network',
+      label: 'Services & Ingress',
       icon: <Network className="w-4 h-4 shrink-0" />,
     },
     {
-      id: ScreenId.INCIDENTS,
-      label: 'Incidents & Alerts',
+      id: 'incidents',
+      label: 'Incidents & PromQL',
       icon: <AlertOctagon className="w-4 h-4 shrink-0" />,
       badge: openIncidentsCount > 0 ? openIncidentsCount : undefined,
+    },
+    {
+      id: 'audit',
+      label: 'Audit Trail',
+      icon: <FileText className="w-4 h-4 shrink-0" />,
     },
   ];
 
@@ -78,7 +81,6 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
 
     return (
       <div className="flex flex-col h-full bg-[#0a0e16]/95 border-r border-slate-800/80 select-none">
-        {/* Brand Header */}
         <div
           className={`h-14 flex items-center border-b border-slate-800/80 shrink-0 ${
             isMini ? 'justify-center px-2' : 'justify-between px-4'
@@ -86,7 +88,13 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         >
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="w-7 h-7 rounded bg-[#06B6D4]/15 border border-[#06B6D4]/40 flex items-center justify-center shrink-0">
-              <svg viewBox="0 0 24 24" className="w-4 h-4 text-[#22D3EE]" fill="none" stroke="currentColor" strokeWidth="2">
+              <svg
+                viewBox="0 0 24 24"
+                className="w-4 h-4 text-[#22D3EE]"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+              >
                 <polygon points="12 2 21 7 21 17 12 22 3 17 3 7" />
                 <circle cx="12" cy="12" r="3" />
               </svg>
@@ -118,31 +126,31 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
           )}
         </div>
 
-        {/* Cluster Switcher */}
+        {/* Kubernetes Context Switcher */}
         <div className={`border-b border-slate-800/80 ${isMini ? 'p-2' : 'p-3'}`}>
           {!isMini && (
             <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-slate-400 mb-2 px-1">
-              Target Cluster
+              Kubernetes Context
             </div>
           )}
           <div className="space-y-1">
-            {clusters.map((cluster) => {
-              const isActive = cluster.id === activeClusterId;
+            {clusters.map((c) => {
+              const isActive = c.id === activeCluster.id;
               const statusDotColor =
-                cluster.status === 'CRASHED'
-                  ? 'bg-red-400'
-                  : cluster.status === 'DEGRADED'
-                  ? 'bg-amber-400'
-                  : 'bg-emerald-400';
+                c.kubernetesStatus === 'connected'
+                  ? 'bg-emerald-400'
+                  : c.kubernetesStatus === 'error'
+                    ? 'bg-red-400'
+                    : 'bg-slate-500';
 
               return (
                 <button
-                  key={cluster.id}
+                  key={c.id}
                   onClick={() => {
-                    onSelectCluster(cluster.id);
+                    onSelectContext(c.contextName);
                     if (isMobile) onCloseMobile();
                   }}
-                  title={cluster.name}
+                  title={`${c.name} (${c.kubernetesStatus})`}
                   className={`w-full flex items-center rounded transition-colors text-left ${
                     isMini ? 'justify-center py-2 px-1' : 'justify-between px-2.5 py-2'
                   } ${
@@ -152,17 +160,12 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
                   }`}
                 >
                   <div className="flex items-center gap-2 min-w-0">
-                    <span
-                      className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotColor}`}
-                      aria-hidden="true"
-                    />
-                    {!isMini && (
-                      <span className="font-mono text-xs truncate">{cluster.name}</span>
-                    )}
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${statusDotColor}`} />
+                    {!isMini && <span className="font-mono text-xs truncate">{c.name}</span>}
                   </div>
                   {!isMini && (
-                    <span className="font-mono text-[10px] text-slate-500 shrink-0 ml-1">
-                      {cluster.nodes.length}n
+                    <span className="font-mono text-[10px] text-slate-400 shrink-0 ml-1 uppercase">
+                      {c.connectionMode}
                     </span>
                   )}
                 </button>
@@ -171,7 +174,6 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
           </div>
         </div>
 
-        {/* Primary Screens */}
         <nav className={`flex-1 overflow-y-auto micro-scroll ${isMini ? 'p-2' : 'p-3'} space-y-1`}>
           {!isMini && (
             <div className="font-mono text-[10px] uppercase tracking-[0.08em] text-slate-400 mb-2 px-1">
@@ -200,7 +202,9 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
                   <span className={isActive ? 'text-[#22D3EE]' : 'text-slate-400'}>
                     {item.icon}
                   </span>
-                  {!isMini && <span className="text-[13px] font-medium truncate">{item.label}</span>}
+                  {!isMini && (
+                    <span className="text-[13px] font-medium truncate">{item.label}</span>
+                  )}
                 </div>
                 {item.badge !== undefined && !isMini && (
                   <span className="font-mono text-[10px] font-semibold px-1.5 py-0.5 rounded bg-red-500/15 text-red-400 border border-red-500/30 tabular-nums">
@@ -215,7 +219,6 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
           })}
         </nav>
 
-        {/* Bottom Collapse Trigger when Mini */}
         {!isMobile && isMini && (
           <div className="p-2 border-t border-slate-800/80 flex justify-center">
             <button
@@ -228,20 +231,37 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
           </div>
         )}
 
-        {/* Cluster Metadata Footer when Expanded */}
         {!isMini && (
           <div className="p-3 border-t border-slate-800/80 bg-[#070A0F]/60 text-[11px] font-mono text-slate-400 space-y-1">
-            <div className="flex items-center justify-between">
-              <span>Control Plane</span>
-              <span className="text-slate-200">{activeCluster.controlPlaneIp}</span>
+            <div className="flex items-center justify-between gap-2">
+              <span>API Server</span>
+              <span className="text-slate-200 truncate">{activeCluster.serverDisplay}</span>
             </div>
-            <div className="flex items-center justify-between">
-              <span>VPC CIDR</span>
-              <span className="text-slate-300">{activeCluster.vpcCidr}</span>
-            </div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-2">
               <span>Kubernetes</span>
-              <span className="text-[#4cd7f6]">{activeCluster.k8sVersion}</span>
+              <span
+                className={
+                  activeCluster.kubernetesStatus === 'connected'
+                    ? 'text-emerald-400'
+                    : 'text-amber-400'
+                }
+              >
+                {activeCluster.kubernetesStatus}
+              </span>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>Prometheus</span>
+              <span
+                className={
+                  activeCluster.prometheusStatus === 'connected'
+                    ? 'text-emerald-400'
+                    : activeCluster.prometheusStatus === 'demo'
+                      ? 'text-[#4cd7f6]'
+                      : 'text-slate-400'
+                }
+              >
+                {activeCluster.prometheusStatus}
+              </span>
             </div>
           </div>
         )}
@@ -251,7 +271,6 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
 
   return (
     <>
-      {/* Desktop Collapsible Rail */}
       <aside
         className={`hidden lg:block shrink-0 transition-[width] duration-200 ease-out ${
           collapsed ? 'w-[64px]' : 'w-[240px]'
@@ -260,16 +279,10 @@ export const SidebarRail: React.FC<SidebarRailProps> = ({
         {railContent(false)}
       </aside>
 
-      {/* Mobile / Tablet Slide-over Rail */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 lg:hidden flex">
-          <div
-            className="fixed inset-0 bg-black/70 backdrop-blur-xs"
-            onClick={onCloseMobile}
-          />
-          <div className="relative w-[260px] max-w-[80vw] h-full z-10">
-            {railContent(true)}
-          </div>
+          <div className="fixed inset-0 bg-black/70 backdrop-blur-xs" onClick={onCloseMobile} />
+          <div className="relative w-[260px] max-w-[80vw] h-full z-10">{railContent(true)}</div>
         </div>
       )}
     </>
