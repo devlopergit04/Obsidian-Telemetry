@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { loadConfig } from '../src/server/config.ts';
 import {
@@ -5,6 +8,7 @@ import {
   signSessionCookie,
   verifySessionCookie,
 } from '../src/server/middleware/auth.ts';
+import { resolvePlatformPaths } from '../src/server/platform.ts';
 import { AuditLogger } from '../src/server/services/auditLogger.ts';
 import { IncidentService } from '../src/server/services/incidentService.ts';
 import {
@@ -15,10 +19,40 @@ import {
   parseMemoryMiB,
 } from '../src/server/services/kubernetesService.ts';
 import { PrometheusService } from '../src/server/services/prometheusService.ts';
+import { hashPassword, StateStore, verifyPassword } from '../src/server/services/stateStore.ts';
 
 describe('Server Config & Auth Security', () => {
+  it('defaults to host 0.0.0.0 and port 1392 while honoring OT_PORT and OT_HOST overrides', () => {
+    const defaults = loadConfig({ NODE_ENV: 'test' });
+    expect(defaults.host).toBe('0.0.0.0');
+    expect(defaults.port).toBe(1392);
+    expect(defaults.authMode).toBe('optional');
+
+    const overridden = loadConfig({
+      NODE_ENV: 'test',
+      OT_HOST: '127.0.0.1',
+      OT_PORT: '8080',
+      PORT: '3000',
+    });
+    expect(overridden.host).toBe('127.0.0.1');
+    expect(overridden.port).toBe(8080);
+
+    const tmpProdHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ot-prod-cfg-'));
+    try {
+      const prodDefaults = loadConfig({
+        NODE_ENV: 'production',
+        OT_HOME: tmpProdHome,
+      });
+      expect(prodDefaults.authMode).toBe('token');
+      expect(prodDefaults.generatedAdminPassword).toBeTruthy();
+    } finally {
+      fs.rmSync(tmpProdHome, { recursive: true, force: true });
+    }
+  });
+
   it('loads defaults cleanly and ignores placeholder tokens', () => {
     const cfg = loadConfig({
+      NODE_ENV: 'test',
       PORT: '3000',
       AUTH_MODE: 'token',
       OBSIDIAN_ADMIN_TOKEN: 'replace-with-strong-admin-token',
@@ -34,8 +68,98 @@ describe('Server Config & Auth Security', () => {
     expect(cfg.sessionSecret.length).toBeGreaterThanOrEqual(32);
   });
 
+  it('resolves cross-platform config and data paths for Linux, macOS, Windows, and OT_HOME', () => {
+    const linux = resolvePlatformPaths({}, 'linux', '/home/alice');
+    expect(linux.configDir).toBe('/home/alice/.config/obsidian-telemetry');
+    expect(linux.dataDir).toBe('/home/alice/.local/share/obsidian-telemetry');
+
+    const mac = resolvePlatformPaths({}, 'darwin', '/Users/alice');
+    expect(mac.configDir).toContain('Application Support');
+    expect(mac.dataDir).toContain('Obsidian Telemetry');
+
+    const win = resolvePlatformPaths(
+      {
+        APPDATA: 'C:\\Users\\alice\\AppData\\Roaming',
+        LOCALAPPDATA: 'C:\\Users\\alice\\AppData\\Local',
+      },
+      'win32',
+      'C:\\Users\\alice'
+    );
+    expect(win.configDir).toContain('Obsidian Telemetry');
+    expect(win.dataDir).toContain('Obsidian Telemetry');
+
+    const custom = resolvePlatformPaths({ OT_HOME: '/tmp/ot-custom' }, 'linux', '/home/alice');
+    expect(custom.configDir).toBe('/tmp/ot-custom/config');
+    expect(custom.dataDir).toBe('/tmp/ot-custom/data');
+  });
+
+  it('hashes and verifies passwords with scrypt and persists state across restarts', () => {
+    const hash = hashPassword('super-secret-pass');
+    expect(hash.startsWith('scrypt$')).toBe(true);
+    expect(verifyPassword('super-secret-pass', hash)).toBe(true);
+    expect(verifyPassword('wrong-pass', hash)).toBe(false);
+
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ot-store-'));
+    try {
+      const paths = resolvePlatformPaths({ OT_HOME: tmpHome });
+      const store1 = new StateStore(paths);
+      const boot1 = store1.ensureCredentials();
+      expect(boot1.generatedAdminPassword).toBeTruthy();
+      expect(store1.verifyUserLogin('admin', boot1.generatedAdminPassword!)?.role).toBe('admin');
+
+      const incidents1 = new IncidentService(store1);
+      incidents1.acknowledge('INC-PERSIST', 'admin');
+      const logger1 = new AuditLogger(50, store1);
+      logger1.record({
+        actorId: 'admin',
+        actorRole: 'admin',
+        action: 'TEST_PERSIST',
+        target: 'node/test',
+        clusterId: 'default',
+        outcome: 'succeeded',
+        detail: 'persisted check',
+        ip: '127.0.0.1',
+      });
+
+      // Reload fresh instances from same disk paths
+      const store2 = new StateStore(paths);
+      const boot2 = store2.ensureCredentials();
+      expect(boot2.generatedAdminPassword).toBeUndefined();
+
+      const incidents2 = new IncidentService(store2);
+      const merged = incidents2.merge([
+        {
+          id: 'INC-PERSIST',
+          title: 'Test',
+          severity: 'WARNING',
+          source: 'pod-health',
+          acknowledged: false,
+          resolvedLocally: false,
+          targetResource: 'pod/x',
+          openedAt: '2026-01-01T00:00:00Z',
+          summary: 'test',
+          labels: {},
+        },
+      ]);
+      expect(merged[0].acknowledged).toBe(true);
+      expect(merged[0].acknowledgedBy).toBe('admin');
+
+      const logger2 = new AuditLogger(50, store2);
+      expect(logger2.list(10)[0].action).toBe('TEST_PERSIST');
+
+      // Verify schema migration writes .bak backup
+      fs.writeFileSync(paths.configFile, JSON.stringify({ schemaVersion: 0, port: 1392 }), 'utf8');
+      const migrated = store2.loadConfig();
+      expect(migrated.schemaVersion).toBe(1);
+      expect(fs.existsSync(`${paths.configFile}.bak`)).toBe(true);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
+  });
+
   it('resolves token roles using timing-safe comparison and rejects invalid tokens', () => {
     const cfg = loadConfig({
+      NODE_ENV: 'test',
       OBSIDIAN_ADMIN_TOKEN: 'adm-999',
       OBSIDIAN_OPERATOR_TOKEN: 'opr-888',
       OBSIDIAN_VIEWER_TOKEN: 'vwr-777',

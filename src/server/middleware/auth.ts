@@ -20,6 +20,8 @@ interface SessionPayload {
 
 export interface AuthenticatedRequest extends Request {
   auth?: AuthSession;
+  authMethod?: 'bearer' | 'cookie' | 'anonymous';
+  sessionCookieRaw?: string;
 }
 
 function safeEqual(a: string, b: string): boolean {
@@ -71,6 +73,13 @@ export function verifySessionCookie(
   }
 }
 
+export function deriveCsrfToken(sessionCookieValue: string, secret: string): string {
+  return crypto
+    .createHmac('sha256', secret)
+    .update(`csrf:${sessionCookieValue}`)
+    .digest('base64url');
+}
+
 export function parseCookies(cookieHeader: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
   if (!cookieHeader) return out;
@@ -87,7 +96,7 @@ export function parseCookies(cookieHeader: string | undefined): Record<string, s
 export function extractAuthFromHeaders(
   headers: { authorization?: string; cookie?: string },
   config: AppConfig
-): AuthSession {
+): AuthSession & { authMethod: 'bearer' | 'cookie' | 'anonymous'; sessionCookieRaw?: string } {
   const authHeader = headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.slice(7).trim();
@@ -100,13 +109,15 @@ export function extractAuthFromHeaders(
         actorId: resolved.actorId,
         podExecEnabled: config.enablePodExec,
         demoModeEnabled: config.enableDemoMode,
+        authMethod: 'bearer',
       };
     }
   }
 
   const cookies = parseCookies(headers.cookie);
-  const session = verifySessionCookie(cookies[SESSION_COOKIE_NAME], config.sessionSecret);
-  if (session) {
+  const rawCookie = cookies[SESSION_COOKIE_NAME];
+  const session = verifySessionCookie(rawCookie, config.sessionSecret);
+  if (session && rawCookie) {
     return {
       authenticated: true,
       authMode: config.authMode,
@@ -114,6 +125,9 @@ export function extractAuthFromHeaders(
       actorId: session.actorId,
       podExecEnabled: config.enablePodExec,
       demoModeEnabled: config.enableDemoMode,
+      csrfToken: deriveCsrfToken(rawCookie, config.sessionSecret),
+      authMethod: 'cookie',
+      sessionCookieRaw: rawCookie,
     };
   }
 
@@ -124,18 +138,62 @@ export function extractAuthFromHeaders(
     actorId: 'anonymous-viewer',
     podExecEnabled: config.enablePodExec,
     demoModeEnabled: config.enableDemoMode,
+    authMethod: 'anonymous',
   };
 }
 
 export function attachAuthMiddleware(config: AppConfig) {
   return (req: AuthenticatedRequest, _res: Response, next: NextFunction): void => {
-    req.auth = extractAuthFromHeaders(
+    const extracted = extractAuthFromHeaders(
       {
         authorization: req.headers.authorization,
         cookie: req.headers.cookie,
       },
       config
     );
+    const { authMethod, sessionCookieRaw, ...session } = extracted;
+    req.auth = session;
+    req.authMethod = authMethod;
+    req.sessionCookieRaw = sessionCookieRaw;
+    next();
+  };
+}
+
+export function requireCsrfForCookieMutations(config: AppConfig, audit: AuditLogger) {
+  return (req: AuthenticatedRequest, res: Response, next: NextFunction): void => {
+    const method = req.method.toUpperCase();
+    if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') {
+      next();
+      return;
+    }
+    if (req.path === '/auth/login') {
+      next();
+      return;
+    }
+    if (req.authMethod !== 'cookie' || !req.sessionCookieRaw) {
+      next();
+      return;
+    }
+
+    const supplied = req.headers['x-csrf-token'];
+    const token = Array.isArray(supplied) ? supplied[0] : supplied;
+    const expected = deriveCsrfToken(req.sessionCookieRaw, config.sessionSecret);
+
+    if (!token || !safeEqual(token, expected)) {
+      audit.record({
+        actorId: req.auth?.actorId || 'unknown',
+        actorRole: req.auth?.role || 'viewer',
+        action: `${req.method} ${req.path}`,
+        target: req.path,
+        clusterId: 'global',
+        outcome: 'denied',
+        detail: 'Missing or invalid X-CSRF-Token header for cookie-authenticated mutation',
+        ip: req.ip || 'unknown',
+      });
+      res.status(403).json({ error: 'Invalid or missing CSRF token.' });
+      return;
+    }
+
     next();
   };
 }
@@ -159,9 +217,9 @@ export function requireRole(minRole: UserRole, config: AppConfig, audit: AuditLo
         detail: 'Unauthenticated request rejected under AUTH_MODE=token',
         ip: req.ip || 'unknown',
       });
-      res.status(401).json({
-        error: 'Authentication required. Provide a valid Bearer token or session cookie.',
-      });
+      res
+        .status(401)
+        .json({ error: 'Authentication required. Provide valid credentials or Bearer token.' });
       return;
     }
 
@@ -177,7 +235,7 @@ export function requireRole(minRole: UserRole, config: AppConfig, audit: AuditLo
         ip: req.ip || 'unknown',
       });
       res.status(401).json({
-        error: `Authentication required. Sign in with an ${minRole} or admin token to perform this action.`,
+        error: `Authentication required. Sign in with an ${minRole} or admin account to perform this action.`,
       });
       return;
     }

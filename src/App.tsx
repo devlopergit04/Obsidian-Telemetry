@@ -148,9 +148,11 @@ export default function App() {
         }
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
-          setAuthModalOpen(true);
-          notify('Authentication required to query cluster telemetry', true);
-        } else {
+          if (!opts?.silent) {
+            setAuthModalOpen(true);
+            notify('Authentication required to query cluster telemetry', true);
+          }
+        } else if (!opts?.silent) {
           notify(err instanceof Error ? err.message : 'Failed to refresh cluster state', true);
         }
       } finally {
@@ -512,10 +514,25 @@ export default function App() {
           notify(`Authenticated as ${next.role}`);
           await loadSessionAndSnapshot({ silent: true });
         }}
+        onLoginCredentials={async (username, password) => {
+          const next = await apiClient.loginWithPassword(username, password);
+          setSession(next);
+          setAuditRefreshKey((k) => k + 1);
+          notify(`Signed in as ${next.actorId} (${next.role})`);
+          await loadSessionAndSnapshot({ silent: true });
+        }}
+        onChangePassword={async (currentPassword, newPassword) => {
+          await apiClient.changePassword(currentPassword, newPassword);
+          setAuditRefreshKey((k) => k + 1);
+          notify('Administrator password updated');
+        }}
         onLogout={async () => {
           await apiClient.logout();
+          if (session.authMode === 'token') {
+            setSnapshot(EMPTY_SNAPSHOT);
+          }
           setAuditRefreshKey((k) => k + 1);
-          notify('Signed out to viewer session');
+          notify('Signed out');
           await loadSessionAndSnapshot({ silent: true });
         }}
       />

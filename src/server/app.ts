@@ -8,6 +8,8 @@ import type { ClusterSnapshot, DataSourceMode, TimeWindow } from '../shared/type
 import type { AppConfig } from './config.ts';
 import {
   attachAuthMiddleware,
+  deriveCsrfToken,
+  requireCsrfForCookieMutations,
   requireRole,
   resolveTokenRole,
   SESSION_COOKIE_NAME,
@@ -19,6 +21,7 @@ import { getDemoPodLogs, getDemoSnapshot } from './services/demoProvider.ts';
 import { IncidentService } from './services/incidentService.ts';
 import { KubernetesService } from './services/kubernetesService.ts';
 import { PrometheusService } from './services/prometheusService.ts';
+import type { StateStore } from './services/stateStore.ts';
 
 const TimeWindowSchema = z.enum(['15m', '1h', '6h', '24h']).default('15m');
 const K8sNameSchema = z
@@ -27,8 +30,19 @@ const K8sNameSchema = z
   .max(253)
   .regex(/^[a-z0-9]([-a-z0-9.]*[a-z0-9])?$/, 'Invalid Kubernetes resource identifier');
 
-const LoginBodySchema = z.object({
-  token: z.string().min(1),
+const LoginBodySchema = z.union([
+  z.object({
+    token: z.string().min(1).max(512),
+  }),
+  z.object({
+    username: z.string().min(1).max(64),
+    password: z.string().min(1).max(256),
+  }),
+]);
+
+const PasswordChangeSchema = z.object({
+  currentPassword: z.string().min(1).max(256),
+  newPassword: z.string().min(8, 'New password must be at least 8 characters').max(256),
 });
 
 const ScaleBodySchema = z.object({
@@ -45,6 +59,7 @@ export interface AppServices {
   promService: PrometheusService;
   incidentService: IncidentService;
   auditLogger: AuditLogger;
+  stateStore?: StateStore;
 }
 
 export function extractClientIp(req: Request): string {
@@ -63,8 +78,26 @@ export function extractClientIp(req: Request): string {
   return net.isIP(fallback) ? fallback : '127.0.0.1';
 }
 
+function isOriginAllowedForRequest(
+  origin: string | undefined,
+  hostHeader: string | undefined,
+  config: AppConfig
+): boolean {
+  if (!origin) return true;
+  if (config.corsOriginExplicit) {
+    return config.corsOrigins.includes('*') || config.corsOrigins.includes(origin);
+  }
+  if (config.corsOrigins.includes(origin)) {
+    return true;
+  }
+  if (hostHeader && (origin === `http://${hostHeader}` || origin === `https://${hostHeader}`)) {
+    return true;
+  }
+  return false;
+}
+
 export function createApp(services: AppServices): express.Express {
-  const { config, k8sService, promService, incidentService, auditLogger } = services;
+  const { config, k8sService, promService, incidentService, auditLogger, stateStore } = services;
   const app = express();
 
   app.set('trust proxy', 1);
@@ -75,15 +108,14 @@ export function createApp(services: AppServices): express.Express {
     })
   );
   app.use(
-    cors({
-      origin: (origin, cb) => {
-        if (!origin || config.corsOrigins.includes('*') || config.corsOrigins.includes(origin)) {
-          cb(null, true);
-          return;
-        }
+    cors((req, cb) => {
+      const origin = req.headers.origin;
+      const host = req.headers.host;
+      if (isOriginAllowedForRequest(origin, host, config)) {
+        cb(null, { origin: true, credentials: true });
+      } else {
         cb(new Error('CORS origin denied'));
-      },
-      credentials: true,
+      }
     })
   );
   app.use(express.json({ limit: '64kb' }));
@@ -98,6 +130,7 @@ export function createApp(services: AppServices): express.Express {
   });
   app.use('/api', limiter);
   app.use(attachAuthMiddleware(config));
+  app.use('/api', requireCsrfForCookieMutations(config, auditLogger));
 
   // Health Check
   app.get('/api/health', (_req: Request, res: Response) => {
@@ -120,11 +153,30 @@ export function createApp(services: AppServices): express.Express {
   app.post('/api/auth/login', (req: Request, res: Response) => {
     const parsed = LoginBodySchema.safeParse(req.body);
     if (!parsed.success) {
-      res.status(400).json({ error: 'Token is required' });
+      res.status(400).json({ error: 'Token or username and password are required' });
       return;
     }
 
-    const resolved = resolveTokenRole(parsed.data.token.trim(), config);
+    let resolved: { role: 'viewer' | 'operator' | 'admin'; actorId: string } | null = null;
+    let authDetail = '';
+
+    if ('token' in parsed.data) {
+      resolved = resolveTokenRole(parsed.data.token.trim(), config);
+      authDetail = resolved
+        ? `Authenticated via role token as ${resolved.role}`
+        : 'Invalid role token supplied';
+    } else if (stateStore) {
+      const userMatch = stateStore.verifyUserLogin(parsed.data.username, parsed.data.password);
+      if (userMatch) {
+        resolved = { role: userMatch.role, actorId: userMatch.username };
+        authDetail = `Authenticated via local credentials as ${userMatch.username} (${userMatch.role})`;
+      } else {
+        authDetail = `Invalid username or password for '${parsed.data.username.trim()}'`;
+      }
+    } else {
+      authDetail = 'Local credential store unavailable in test/ephemeral mode';
+    }
+
     if (!resolved) {
       auditLogger.record({
         actorId: 'unauthenticated',
@@ -133,8 +185,8 @@ export function createApp(services: AppServices): express.Express {
         target: 'session',
         clusterId: 'global',
         outcome: 'denied',
-        detail: 'Invalid role token supplied',
-        ip: req.ip || 'unknown',
+        detail: authDetail,
+        ip: extractClientIp(req),
       });
       res.status(401).json({ error: 'Invalid credentials' });
       return;
@@ -148,11 +200,13 @@ export function createApp(services: AppServices): express.Express {
       },
       config.sessionSecret
     );
+    const csrfToken = deriveCsrfToken(cookieVal, config.sessionSecret);
+    const isSecureRequest = req.secure || req.headers['x-forwarded-proto'] === 'https';
 
     res.cookie(SESSION_COOKIE_NAME, cookieVal, {
       httpOnly: true,
       sameSite: 'strict',
-      secure: config.nodeEnv === 'production',
+      secure: isSecureRequest,
       maxAge: 8 * 60 * 60 * 1000,
       path: '/',
     });
@@ -164,8 +218,8 @@ export function createApp(services: AppServices): express.Express {
       target: 'session',
       clusterId: 'global',
       outcome: 'succeeded',
-      detail: `Authenticated session established as ${resolved.role}`,
-      ip: req.ip || 'unknown',
+      detail: authDetail,
+      ip: extractClientIp(req),
     });
 
     res.json({
@@ -175,6 +229,7 @@ export function createApp(services: AppServices): express.Express {
       actorId: resolved.actorId,
       podExecEnabled: config.enablePodExec,
       demoModeEnabled: config.enableDemoMode,
+      csrfToken,
     });
   });
 
@@ -188,10 +243,59 @@ export function createApp(services: AppServices): express.Express {
       clusterId: 'global',
       outcome: 'succeeded',
       detail: 'Session cookie cleared',
-      ip: req.ip || 'unknown',
+      ip: extractClientIp(req),
     });
     res.json({ ok: true });
   });
+
+  app.post(
+    '/api/auth/password',
+    requireRole('viewer', config, auditLogger),
+    (req: AuthenticatedRequest, res: Response) => {
+      if (!req.auth?.authenticated) {
+        res.status(401).json({ error: 'Sign in with a local account to update your password.' });
+        return;
+      }
+      if (!stateStore) {
+        res.status(400).json({ error: 'Local credential persistence is disabled.' });
+        return;
+      }
+      const parsed = PasswordChangeSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: parsed.error.issues.map((i) => i.message).join('; '),
+        });
+        return;
+      }
+      const verified = stateStore.verifyUserLogin(req.auth.actorId, parsed.data.currentPassword);
+      if (!verified) {
+        auditLogger.record({
+          actorId: req.auth.actorId,
+          actorRole: req.auth.role,
+          action: 'AUTH_PASSWORD_CHANGE',
+          target: req.auth.actorId,
+          clusterId: 'global',
+          outcome: 'denied',
+          detail: 'Current password verification failed',
+          ip: extractClientIp(req),
+        });
+        res.status(401).json({ error: 'Current password is incorrect.' });
+        return;
+      }
+      stateStore.setUserPassword(verified.username, parsed.data.newPassword, verified.role);
+      auditLogger.record({
+        actorId: verified.username,
+        actorRole: verified.role,
+        action: 'AUTH_PASSWORD_CHANGE',
+        target: verified.username,
+        clusterId: 'global',
+        outcome: 'succeeded',
+        detail: 'Updated local scrypt password hash',
+        ip: extractClientIp(req),
+      });
+      res.json({ ok: true });
+    }
+  );
 
   // Snapshot Endpoint: Live Kubernetes + Prometheus OR Explicit Demo Mode OR Disconnected
   app.get(
@@ -374,7 +478,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: context || 'default',
           outcome: 'succeeded',
           detail: 'Marked node unschedulable',
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         res.json({ ok: true, nodeName, unschedulable: true });
       } catch (err) {
@@ -386,7 +490,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: 'default',
           outcome: 'failed',
           detail: err instanceof Error ? err.message : 'Failed to cordon node',
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         next(err);
       }
@@ -410,7 +514,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: context || 'default',
           outcome: 'succeeded',
           detail: 'Marked node schedulable',
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         res.json({ ok: true, nodeName, unschedulable: false });
       } catch (err) {
@@ -437,7 +541,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: context || 'default',
           outcome: report.failed.length > 0 ? 'failed' : 'succeeded',
           detail: `Evicted ${report.evicted.length}, skipped ${report.skipped.length}, failed ${report.failed.length}`,
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         res.status(report.failed.length > 0 ? 207 : 200).json(report);
       } catch (err) {
@@ -449,7 +553,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: 'default',
           outcome: 'failed',
           detail: err instanceof Error ? err.message : 'Drain rejected',
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         next(err);
       }
@@ -475,7 +579,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: context || 'default',
           outcome: 'succeeded',
           detail: 'Pod deletion requested via Kubernetes API',
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         res.json({ ok: true, namespace, pod });
       } catch (err) {
@@ -503,7 +607,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: context || 'default',
           outcome: 'succeeded',
           detail: 'Triggered rolling restart annotation patch',
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         res.json({ ok: true, namespace, name });
       } catch (err) {
@@ -536,7 +640,7 @@ export function createApp(services: AppServices): express.Express {
           clusterId: context || 'default',
           outcome: 'succeeded',
           detail: `Scaled replicas to ${parsed.data.replicas}`,
-          ip: req.ip || 'unknown',
+          ip: extractClientIp(req),
         });
         res.json({ ok: true, namespace, name, replicas: parsed.data.replicas });
       } catch (err) {
@@ -560,7 +664,7 @@ export function createApp(services: AppServices): express.Express {
         clusterId: 'global',
         outcome: 'succeeded',
         detail: 'Operator acknowledged incident',
-        ip: req.ip || 'unknown',
+        ip: extractClientIp(req),
       });
       res.json({ ok: true, incidentId, ...state });
     }
@@ -580,7 +684,7 @@ export function createApp(services: AppServices): express.Express {
         clusterId: 'global',
         outcome: 'succeeded',
         detail: 'Operator marked triage resolved locally',
-        ip: req.ip || 'unknown',
+        ip: extractClientIp(req),
       });
       res.json({ ok: true, incidentId, ...state });
     }

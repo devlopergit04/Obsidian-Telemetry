@@ -4,6 +4,14 @@
   "version": "1.0.0",
   "description": "Open-source cloud-native infrastructure observability, Kubernetes cluster telemetry, and live incident response console.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/devlopergit04/Obsidian-Telemetry.git"
+  },
+  "homepage": "https://github.com/devlopergit04/Obsidian-Telemetry#readme",
+  "bugs": {
+    "url": "https://github.com/devlopergit04/Obsidian-Telemetry/issues"
+  },
   "keywords": [
     "observability",
     "kubernetes",
@@ -16,12 +24,29 @@
     "tailwindcss"
   ],
   "type": "module",
+  "bin": {
+    "ot": "./dist-server/src/cli/ot.js"
+  },
+  "files": [
+    "dist",
+    "dist-server",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
   "scripts": {
     "dev": "tsx server.ts",
     "dev:client": "vite --port=5173 --host=0.0.0.0",
-    "build": "vite build",
+    "build:client": "vite build",
+    "build:server": "tsc -p tsconfig.server.json && node -e \"require('node:fs').chmodSync('dist-server/src/cli/ot.js', 0o755)\"",
+    "build": "npm run build:client && npm run build:server",
+    "prepack": "npm run build",
     "start": "node server.ts",
-    "preview": "vite preview --port=3000 --host=0.0.0.0",
+    "ot": "node dist-server/src/cli/ot.js",
+    "preview": "vite preview --port=1392 --host=0.0.0.0",
     "clean": "rm -rf dist dist-server server.js",
     "lint": "tsc --noEmit",
     "lint:code": "oxlint --deny-warnings src server.ts tests",

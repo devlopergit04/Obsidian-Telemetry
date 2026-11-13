@@ -16,12 +16,21 @@ export class ApiError extends Error {
   }
 }
 
+let inMemoryCsrfToken: string | undefined;
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method || 'GET').toUpperCase();
+  const csrfHeaders: Record<string, string> = {};
+  if (method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS' && inMemoryCsrfToken) {
+    csrfHeaders['X-CSRF-Token'] = inMemoryCsrfToken;
+  }
+
   const res = await fetch(url, {
     ...init,
     credentials: 'include',
     headers: {
       'Content-Type': 'application/json',
+      ...csrfHeaders,
       ...init?.headers,
     },
   });
@@ -47,21 +56,45 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return parsed as unknown as T;
 }
 
+function captureSessionCsrf(session: AuthSession): AuthSession {
+  inMemoryCsrfToken = session.csrfToken;
+  return session;
+}
+
 export const apiClient = {
-  getSession(): Promise<AuthSession> {
-    return requestJson<AuthSession>('/api/auth/session');
+  async getSession(): Promise<AuthSession> {
+    const session = await requestJson<AuthSession>('/api/auth/session');
+    return captureSessionCsrf(session);
   },
 
-  login(token: string): Promise<AuthSession> {
-    return requestJson<AuthSession>('/api/auth/login', {
+  async login(token: string): Promise<AuthSession> {
+    const session = await requestJson<AuthSession>('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ token }),
     });
+    return captureSessionCsrf(session);
   },
 
-  logout(): Promise<{ ok: boolean }> {
-    return requestJson<{ ok: boolean }>('/api/auth/logout', {
+  async loginWithPassword(username: string, password: string): Promise<AuthSession> {
+    const session = await requestJson<AuthSession>('/api/auth/login', {
       method: 'POST',
+      body: JSON.stringify({ username, password }),
+    });
+    return captureSessionCsrf(session);
+  },
+
+  async logout(): Promise<{ ok: boolean }> {
+    const res = await requestJson<{ ok: boolean }>('/api/auth/logout', {
+      method: 'POST',
+    });
+    inMemoryCsrfToken = undefined;
+    return res;
+  },
+
+  changePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean }> {
+    return requestJson<{ ok: boolean }>('/api/auth/password', {
+      method: 'POST',
+      body: JSON.stringify({ currentPassword, newPassword }),
     });
   },
 

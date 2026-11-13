@@ -23,6 +23,21 @@ export function attachWebSocketHub(
       return;
     }
 
+    const origin = request.headers.origin;
+    if (origin) {
+      const host = request.headers.host;
+      const sameHostAllowed = host && (origin === `http://${host}` || origin === `https://${host}`);
+      const explicitAllowed =
+        config.corsOriginExplicit &&
+        (config.corsOrigins.includes('*') || config.corsOrigins.includes(origin));
+      const localAllowed = !config.corsOriginExplicit && config.corsOrigins.includes(origin);
+      if (!sameHostAllowed && !explicitAllowed && !localAllowed) {
+        socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+    }
+
     const auth = extractAuthFromHeaders(
       {
         authorization: request.headers.authorization,

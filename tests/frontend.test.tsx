@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AuthModal } from '../src/components/AuthModal.tsx';
 import { ConfirmActionModal } from '../src/components/ConfirmActionModal.tsx';
 import { NodesScreen } from '../src/components/NodesScreen.tsx';
 import { OverviewScreen } from '../src/components/OverviewScreen.tsx';
@@ -121,6 +122,37 @@ describe('Frontend Component Verification', () => {
     expect(screen.getByText('Cluster Infrastructure Disconnected')).toBeTruthy();
     fireEvent.click(screen.getByText('Load Demo Sandbox'));
     expect(onEnableDemo).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders AuthModal with Account credentials and Bearer Token sign-in options', async () => {
+    const onLoginCredentials = vi.fn().mockResolvedValue(undefined);
+    const onLogin = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AuthModal
+        open={true}
+        onClose={vi.fn()}
+        session={VIEWER_SESSION}
+        onLogin={onLogin}
+        onLoginCredentials={onLoginCredentials}
+        onChangePassword={vi.fn()}
+        onLogout={vi.fn()}
+      />
+    );
+
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'pass-123' } });
+    fireEvent.click(screen.getByText('Sign In'));
+    await waitFor(() => expect(onLoginCredentials).toHaveBeenCalledWith('admin', 'pass-123'));
+
+    fireEvent.click(screen.getByText('Bearer Token'));
+    fireEvent.change(screen.getByLabelText('Operator / Admin Bearer Token'), {
+      target: { value: 'tok-xyz' },
+    });
+    await waitFor(() => {
+      const btn = screen.getByText('Authenticate').closest('button') as HTMLButtonElement;
+      expect(btn.disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByText('Authenticate'));
+    await waitFor(() => expect(onLogin).toHaveBeenCalledWith('tok-xyz'));
   });
 
   it('renders NodesScreen and blocks mutations for viewer role or demo mode', () => {

@@ -17,11 +17,13 @@ services:
       dockerfile: Dockerfile
     container_name: obsidian-telemetry
     ports:
-      - '3000:3000'
+      - '1392:1392'
     environment:
       NODE_ENV: production
-      PORT: 3000
-      CORS_ORIGIN: http://localhost:3000
+      OT_HOST: 0.0.0.0
+      OT_PORT: 1392
+      OT_HOME: /var/lib/obsidian-telemetry
+      CORS_ORIGIN: http://localhost:1392
       AUTH_MODE: token
       SESSION_SECRET: ${SESSION_SECRET:-change-me-32-byte-random-secret-key}
       OBSIDIAN_ADMIN_TOKEN: ${OBSIDIAN_ADMIN_TOKEN:-change-me-admin-token}
@@ -32,9 +34,13 @@ services:
       PROMETHEUS_URL: http://prometheus:9090
       ENABLE_POD_EXEC: 'false'
       ENABLE_DEMO_MODE: 'true'
-    # Mount your local kubeconfig read-only if connecting to an external cluster:
-    # volumes:
-    #   - ${HOME}/.kube/config:/home/obsidian/.kube/config:ro
+    volumes:
+      - obsidian_state:/var/lib/obsidian-telemetry
+      # Mount your local kubeconfig read-only if connecting to an external cluster:
+      # - ${HOME}/.kube/config:/home/obsidian/.kube/config:ro
     depends_on:
       - prometheus
     restart: unless-stopped
+
+volumes:
+  obsidian_state:

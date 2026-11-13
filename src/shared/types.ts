@@ -17,6 +17,7 @@ export interface AuthSession {
   actorId: string;
   podExecEnabled: boolean;
   demoModeEnabled: boolean;
+  csrfToken?: string;
 }
 
 export interface RbacCapabilities {
