@@ -1,0 +1,8 @@
+{
+  "name": "Obsidian Telemetry",
+  "description": "Cloud-native infrastructure observability, Kubernetes cluster telemetry, and live incident response console.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
