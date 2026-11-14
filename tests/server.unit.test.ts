@@ -2,13 +2,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
-import { loadConfig } from '../src/server/config.ts';
+import { isPlaceholder, loadConfig } from '../src/server/config.ts';
 import {
+  parseCookies,
   resolveTokenRole,
   signSessionCookie,
   verifySessionCookie,
 } from '../src/server/middleware/auth.ts';
-import { resolvePlatformPaths } from '../src/server/platform.ts';
+import { resolvePlatformPaths, rotateLogIfNeededSync } from '../src/server/platform.ts';
 import { AuditLogger } from '../src/server/services/auditLogger.ts';
 import { IncidentService } from '../src/server/services/incidentService.ts';
 import {
@@ -192,6 +193,101 @@ describe('Server Config & Auth Security', () => {
       secret
     );
     expect(verifySessionCookie(expiredCookie, secret)).toBeNull();
+  });
+
+  it('rejects weak/placeholder production secrets and invalid PROMETHEUS_URL values', () => {
+    expect(isPlaceholder('')).toBe(true);
+    expect(isPlaceholder('change-me-session-secret')).toBe(true);
+    expect(isPlaceholder('<insert-token>')).toBe(true);
+    expect(isPlaceholder('real-cryptographic-random-token-9988')).toBe(false);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        SESSION_SECRET: 'change-me-session-secret',
+      })
+    ).toThrow(/Invalid SESSION_SECRET/);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'production',
+        SESSION_SECRET: '0123456789abcdef0123456789abcdef',
+        OBSIDIAN_ADMIN_TOKEN: 'replace-with-admin-token',
+      })
+    ).toThrow(/Invalid OBSIDIAN_ADMIN_TOKEN/);
+
+    expect(() =>
+      loadConfig({
+        NODE_ENV: 'test',
+        PROMETHEUS_URL: 'ftp://invalid.endpoint:9090',
+      })
+    ).toThrow();
+  });
+
+  it('safely parses cookies containing malformed percent encodings without throwing', () => {
+    const parsed = parseCookies(
+      'good=hello%20world; bad=%E0%A4%A; empty=; obsidian_session=abc.def'
+    );
+    expect(parsed.good).toBe('hello world');
+    expect(parsed.bad).toBe('%E0%A4%A');
+    expect(parsed.obsidian_session).toBe('abc.def');
+  });
+
+  it('recovers corrupt JSON state from .bak, rotates oversized logs, and verifies SHA-256 backups', () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ot-recovery-'));
+    try {
+      const paths = resolvePlatformPaths({ OT_HOME: tmpHome });
+      const store = new StateStore(paths);
+      const boot = store.ensureCredentials('backup-pass-9876');
+      store.saveConfig({ host: '127.0.0.1', port: 2392 });
+      store.saveIncidentAcks({
+        'INC-42': {
+          acknowledged: true,
+          acknowledgedBy: 'admin',
+          acknowledgedAt: '2026-01-01T00:00:00Z',
+          resolvedLocally: false,
+        },
+      });
+      // Update config a second time so .bak exists
+      store.saveConfig({ host: '127.0.0.1', port: 2492 });
+      expect(fs.existsSync(`${paths.configFile}.bak`)).toBe(true);
+
+      // Corrupt primary config.json and ensure quarantine + .bak recovery
+      fs.writeFileSync(paths.configFile, '{corrupt json!!!', 'utf8');
+      const recovered = store.loadConfig();
+      expect(recovered.port).toBe(2392);
+      const corruptCopies = fs
+        .readdirSync(paths.configDir)
+        .filter((f) => f.startsWith('config.json.corrupt.'));
+      expect(corruptCopies.length).toBe(1);
+
+      // Export backup, tamper test, and restore test
+      const backupFile = path.join(tmpHome, 'bundle.json');
+      const bundle = store.exportBackup(backupFile);
+      expect(bundle.format).toBe('obsidian-telemetry-backup');
+      expect(bundle.checksumSha256).toHaveLength(64);
+
+      const tampered = JSON.parse(fs.readFileSync(backupFile, 'utf8')) as typeof bundle;
+      tampered.payload.auditLines.push('{"tampered":true}');
+      const tamperedFile = path.join(tmpHome, 'tampered.json');
+      fs.writeFileSync(tamperedFile, JSON.stringify(tampered), 'utf8');
+      expect(() => store.importBackup(tamperedFile)).toThrow(/SHA-256 mismatch/);
+
+      // Wipe primary config and restore cleanly
+      fs.rmSync(paths.configFile, { force: true });
+      store.importBackup(backupFile);
+      expect(store.loadConfig().port).toBe(2392);
+      expect(boot.credentials.sessionSecret.length).toBeGreaterThanOrEqual(32);
+
+      // Verify log rotation
+      fs.mkdirSync(paths.logsDir, { recursive: true });
+      fs.writeFileSync(paths.serverLogFile, 'x'.repeat(256), 'utf8');
+      expect(rotateLogIfNeededSync(paths.serverLogFile, 100, 2)).toBe(true);
+      expect(fs.existsSync(`${paths.serverLogFile}.1`)).toBe(true);
+      expect(fs.existsSync(paths.serverLogFile)).toBe(false);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
+    }
   });
 });
 

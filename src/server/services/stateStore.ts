@@ -50,6 +50,19 @@ export interface RuntimePidInfo {
   nodeVersion: string;
 }
 
+export interface BackupBundle {
+  format: 'obsidian-telemetry-backup';
+  schemaVersion: number;
+  createdAt: string;
+  checksumSha256: string;
+  payload: {
+    config: PersistedConfig | null;
+    credentials: PersistedCredentials | null;
+    state: PersistedAppState | null;
+    auditLines: string[];
+  };
+}
+
 export function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
   const derived = crypto.scryptSync(password, salt, 64).toString('hex');
@@ -71,11 +84,37 @@ export function verifyPassword(password: string, stored: string): boolean {
   }
 }
 
+function computeBackupChecksum(payload: BackupBundle['payload']): string {
+  return crypto.createHash('sha256').update(JSON.stringify(payload), 'utf8').digest('hex');
+}
+
 export class StateStore {
   readonly paths: PlatformPaths;
 
   constructor(paths: PlatformPaths) {
     this.paths = paths;
+  }
+
+  private preserveCorruptFile(filePath: string, raw: string): void {
+    try {
+      const corruptPath = `${filePath}.corrupt.${Date.now()}`;
+      writeFileAtomicSync(corruptPath, raw, 0o600);
+    } catch {
+      // Ignore preservation failures if filesystem is read-only
+    }
+  }
+
+  private writeJsonWithBackup<T>(filePath: string, nextValue: T): void {
+    if (fs.existsSync(filePath)) {
+      try {
+        const previous = fs.readFileSync(filePath, 'utf8');
+        JSON.parse(previous);
+        writeFileAtomicSync(`${filePath}.bak`, previous, 0o600);
+      } catch {
+        // Do not overwrite good .bak with corrupt primary data
+      }
+    }
+    writeFileAtomicSync(filePath, JSON.stringify(nextValue, null, 2), 0o600);
   }
 
   private readJsonWithMigration<T extends { schemaVersion?: number }>(
@@ -85,9 +124,14 @@ export class StateStore {
     if (!fs.existsSync(filePath)) {
       return defaultValue();
     }
+
+    let raw = '';
     try {
-      const raw = fs.readFileSync(filePath, 'utf8');
+      raw = fs.readFileSync(filePath, 'utf8');
       const parsed = JSON.parse(raw) as T;
+      if (!parsed || typeof parsed !== 'object') {
+        throw new Error('Parsed state is not an object');
+      }
       if (
         typeof parsed.schemaVersion === 'number' &&
         parsed.schemaVersion < CURRENT_SCHEMA_VERSION
@@ -98,6 +142,23 @@ export class StateStore {
       }
       return parsed;
     } catch {
+      if (raw) {
+        this.preserveCorruptFile(filePath, raw);
+      }
+      const bakPath = `${filePath}.bak`;
+      if (fs.existsSync(bakPath)) {
+        try {
+          const bakRaw = fs.readFileSync(bakPath, 'utf8');
+          const recovered = JSON.parse(bakRaw) as T;
+          if (recovered && typeof recovered === 'object') {
+            recovered.schemaVersion = CURRENT_SCHEMA_VERSION;
+            writeFileAtomicSync(filePath, JSON.stringify(recovered, null, 2), 0o600);
+            return recovered;
+          }
+        } catch {
+          // Backup file also unreadable; fall back cleanly to defaults
+        }
+      }
       return defaultValue();
     }
   }
@@ -115,7 +176,7 @@ export class StateStore {
       ...cfg,
       schemaVersion: CURRENT_SCHEMA_VERSION,
     };
-    writeFileAtomicSync(this.paths.configFile, JSON.stringify(next, null, 2), 0o600);
+    this.writeJsonWithBackup(this.paths.configFile, next);
     return next;
   }
 
@@ -141,6 +202,11 @@ export class StateStore {
       changed = true;
     }
 
+    if (!creds.users || typeof creds.users !== 'object') {
+      creds.users = {};
+      changed = true;
+    }
+
     if (Object.keys(creds.users).length === 0) {
       const initialPassword =
         bootstrapEnvPassword?.trim() || crypto.randomBytes(15).toString('base64url');
@@ -156,7 +222,7 @@ export class StateStore {
     }
 
     if (changed) {
-      writeFileAtomicSync(this.paths.credentialsFile, JSON.stringify(creds, null, 2), 0o600);
+      this.writeJsonWithBackup(this.paths.credentialsFile, creds);
     }
 
     return { credentials: creds, generatedAdminPassword };
@@ -181,7 +247,7 @@ export class StateStore {
       passwordHash: hashPassword(newPassword),
       updatedAt: new Date().toISOString(),
     };
-    writeFileAtomicSync(this.paths.credentialsFile, JSON.stringify(creds, null, 2), 0o600);
+    this.writeJsonWithBackup(this.paths.credentialsFile, creds);
   }
 
   loadState(): PersistedAppState {
@@ -198,7 +264,7 @@ export class StateStore {
       schemaVersion: CURRENT_SCHEMA_VERSION,
       incidentAcks: acks,
     };
-    writeFileAtomicSync(this.paths.stateFile, JSON.stringify(next, null, 2), 0o600);
+    this.writeJsonWithBackup(this.paths.stateFile, next);
   }
 
   appendAuditEntry(entry: AuditEntry): void {
@@ -232,6 +298,85 @@ export class StateStore {
     } catch {
       return [];
     }
+  }
+
+  exportBackup(outputFile: string): BackupBundle {
+    const auditLines = fs.existsSync(this.paths.auditFile)
+      ? fs
+          .readFileSync(this.paths.auditFile, 'utf8')
+          .split('\n')
+          .filter((l) => l.trim().length > 0)
+      : [];
+
+    const payload: BackupBundle['payload'] = {
+      config: fs.existsSync(this.paths.configFile) ? this.loadConfig() : null,
+      credentials: fs.existsSync(this.paths.credentialsFile) ? this.loadCredentials() : null,
+      state: fs.existsSync(this.paths.stateFile) ? this.loadState() : null,
+      auditLines,
+    };
+
+    const bundle: BackupBundle = {
+      format: 'obsidian-telemetry-backup',
+      schemaVersion: CURRENT_SCHEMA_VERSION,
+      createdAt: new Date().toISOString(),
+      checksumSha256: computeBackupChecksum(payload),
+      payload,
+    };
+
+    writeFileAtomicSync(outputFile, JSON.stringify(bundle, null, 2), 0o600);
+    return bundle;
+  }
+
+  importBackup(inputFile: string): BackupBundle {
+    const raw = fs.readFileSync(inputFile, 'utf8');
+    const parsed = JSON.parse(raw) as BackupBundle;
+
+    if (
+      !parsed ||
+      parsed.format !== 'obsidian-telemetry-backup' ||
+      typeof parsed.schemaVersion !== 'number' ||
+      !parsed.payload ||
+      typeof parsed.checksumSha256 !== 'string'
+    ) {
+      throw new Error('Invalid backup archive format.');
+    }
+
+    const actualChecksum = computeBackupChecksum(parsed.payload);
+    const expectedBuf = Buffer.from(parsed.checksumSha256, 'hex');
+    const actualBuf = Buffer.from(actualChecksum, 'hex');
+    if (
+      expectedBuf.length === 0 ||
+      expectedBuf.length !== actualBuf.length ||
+      !crypto.timingSafeEqual(expectedBuf, actualBuf)
+    ) {
+      throw new Error('Backup integrity check failed (SHA-256 mismatch).');
+    }
+
+    if (parsed.payload.config) {
+      this.writeJsonWithBackup(this.paths.configFile, {
+        ...parsed.payload.config,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+      });
+    }
+    if (parsed.payload.credentials) {
+      this.writeJsonWithBackup(this.paths.credentialsFile, {
+        ...parsed.payload.credentials,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+      });
+    }
+    if (parsed.payload.state) {
+      this.writeJsonWithBackup(this.paths.stateFile, {
+        ...parsed.payload.state,
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+      });
+    }
+    if (Array.isArray(parsed.payload.auditLines)) {
+      const content =
+        parsed.payload.auditLines.length > 0 ? `${parsed.payload.auditLines.join('\n')}\n` : '';
+      writeFileAtomicSync(this.paths.auditFile, content, 0o600);
+    }
+
+    return parsed;
   }
 
   writePid(info: RuntimePidInfo): void {

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 160" width="280" height="160" role="img" aria-labelledby="titleExplorer descExplorer">
+  <title id="titleExplorer">Infrastructure Explorer Character Card</title>
+  <desc id="descExplorer">Original vector operator character holding a radar scope scanning bare-metal and cloud nodes for Obsidian Telemetry.</desc>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .ot-anim { display: none; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="bgExp" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#070A0F" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+    <clipPath id="clipExp">
+      <rect x="0" y="0" width="280" height="160" rx="8" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clipExp)">
+    <rect width="280" height="160" fill="url(#bgExp)" />
+    <circle cx="220" cy="48" r="34" fill="none" stroke="#06B6D4" stroke-opacity="0.18" stroke-width="1" />
+    <circle cx="220" cy="48" r="20" fill="none" stroke="#06B6D4" stroke-opacity="0.32" stroke-width="1" />
+    <line x1="220" y1="48" x2="220" y2="14" stroke="#22D3EE" stroke-width="1.5" stroke-opacity="0.8">
+      <animateTransform class="ot-anim" attributeName="transform" type="rotate" from="0 220 48" to="360 220 48" dur="4s" repeatCount="indefinite" />
+    </line>
+    <circle cx="233" cy="37" r="2.5" fill="#10B981">
+      <animate class="ot-anim" attributeName="opacity" values="0.3;1;0.3" dur="2s" repeatCount="indefinite" />
+    </circle>
+    <!-- Character Figure -->
+    <g transform="translate(54, 42)">
+      <!-- Torso / Jacket -->
+      <path d="M 10 88 L 16 54 Q 32 48 48 54 L 54 88 Z" fill="#162235" stroke="#334155" stroke-width="1.5" />
+      <path d="M 24 54 L 32 66 L 40 54" fill="none" stroke="#06B6D4" stroke-width="1.5" />
+      <!-- Hood & Head -->
+      <circle cx="32" cy="30" r="18" fill="#1E293B" stroke="#06B6D4" stroke-width="1.5" />
+      <!-- Visor -->
+      <rect x="19" y="23" width="26" height="11" rx="5" fill="#070A0F" stroke="#22D3EE" stroke-width="1.2" />
+      <circle cx="26" cy="28.5" r="2" fill="#22D3EE" />
+      <circle cx="38" cy="28.5" r="2" fill="#22D3EE" />
+      <!-- Handheld Beacon Probe -->
+      <rect x="52" y="42" width="8" height="24" rx="2" fill="#0F172A" stroke="#06B6D4" stroke-width="1.2" />
+      <circle cx="56" cy="38" r="3" fill="#22D3EE">
+        <animate class="ot-anim" attributeName="r" values="2;4;2" dur="2.2s" repeatCount="indefinite" />
+      </circle>
+    </g>
+    <!-- Label Panel -->
+    <text x="132" y="102" fill="#dfe2ee" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">Infrastructure Explorer</text>
+    <text x="132" y="119" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="10">DISCOVERY · SNAPSHOTS</text>
+    <rect x="132" y="130" width="94" height="16" rx="3" fill="#0B192C" stroke="#06B6D4" stroke-opacity="0.5" />
+    <text x="139" y="141" fill="#22D3EE" font-family="ui-monospace, monospace" font-size="9">ot status / 01</text>
+    <rect x="0.5" y="0.5" width="279" height="159" rx="8" fill="none" stroke="#1E293B" />
+  </g>
+</svg>

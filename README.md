@@ -5,13 +5,13 @@
 <br />
 <br />
 
-```
-[ CLI: ot ] ── [ Node.js + Express + ws ] ── [ React 19 ] ── [ Kubernetes + Prometheus ] ── [ MIT ]
+```text
+[ CLI: ot ] ── [ Node.js 20+ · Express · ws ] ── [ React 19 ] ── [ Kubernetes + Prometheus ] ── [ MIT ]
 ```
 
-**Cross-platform self-hosted infrastructure observability, Kubernetes cluster telemetry, and RBAC-guarded operations console.**
+**Cross-platform self-hosted Kubernetes observability platform, Prometheus PromQL telemetry console, and RBAC-guarded operations CLI.**
 
-[Installation](#installation) · [CLI Usage](#cli-usage) · [Architecture](#architecture) · [Persistence](#persistent-storage) · [Security Model](#security-model) · [Configuration](#configuration) · [Deployment](#deployment) · [Testing](#testing)
+[Quick Install](#installation) · [CLI Commands](#cli-usage) · [Operator Cast](#operator-personas) · [Architecture](#architecture) · [Security](#security-model) · [Persistence](#persistent-storage) · [Documentation Book](./docs/README.md) · [Testing](#testing)
 
 </div>
 
@@ -19,13 +19,15 @@
 
 ## Overview
 
-**Obsidian Telemetry** is an open-source, self-hosted Kubernetes and Prometheus observability platform distributed as both an npm CLI package (`obsidian-telemetry`) and standalone source project.
+**Obsidian Telemetry** (`devlopergit04/Obsidian-Telemetry`) is an independent, MIT-licensed, self-hosted Kubernetes and Prometheus observability platform packaged as an npm CLI (`obsidian-telemetry`) with the single-command executable `ot`.
 
-A single `ot` command launches the production web dashboard and WebSocket backend on port `1392` (`0.0.0.0:1392`) without requiring Docker, systemd, PM2, or cloud hosting. All cluster credentials, local `scrypt` authentication hashes, incident triage overlays, and JSONL audit trails remain on the host server.
+Running `ot` starts a production Express + WebSocket control plane and React 19 web dashboard bound to `0.0.0.0:1392` with zero external database, SaaS control plane, or Docker requirement. Local `scrypt` password credentials, HMAC session secrets, incident triage state, and operational JSONL audit trails remain strictly on host disk.
 
 <div align="center">
   <img src="./.github/assets/telemetry-pulse.svg" alt="Animated Telemetry Sparkline Strip" width="100%" />
 </div>
+
+> **Full Engineering & Operations Book**: Every architectural detail, API route, WebSocket frame, reverse proxy config, systemd/launchd/Windows service setup, and security checklist is documented across 13 chapters (Topics 1–41) in [docs/README.md](./docs/README.md).
 
 ---
 
@@ -34,37 +36,32 @@ A single `ot` command launches the production web dashboard and WebSocket backen
 ### Prerequisites
 
 - **Node.js `>= 20.0.0`** (includes `npm`)
-- Supported platforms: **Linux** (x64, arm64), **macOS** (Intel & Apple Silicon), **Windows 10/11/Server**
+- Supported hosts: **Linux** (`x64`, `arm64`), **macOS** (Apple Silicon & Intel), **Windows 10/11/Server**
 
-### Option A: Install via npm (Linux, macOS, Windows)
+### Method A — Install via npm (Linux, macOS, Windows)
 
 ```bash
 npm install -g obsidian-telemetry
-```
-
-After installation, start the service from any directory:
-
-```bash
 ot
 ```
 
-### Option B: Install Script for Linux & macOS
+### Method B — Install Script for Linux & macOS (`install.sh`)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/devlopergit04/Obsidian-Telemetry/main/install.sh | sh
 ```
 
-The installer verifies OS/architecture compatibility and Node.js `>= 20`, installs `obsidian-telemetry` into `~/.local/share/obsidian-telemetry/npm` without modifying system directories or requiring root privileges, links `~/.local/bin/ot`, and verifies `ot --version`.
+The POSIX installer verifies Node.js `>= 20`, installs `obsidian-telemetry` cleanly under `~/.local/share/obsidian-telemetry/npm` (without modifying system files or requiring root), links `~/.local/bin/ot`, and verifies `ot --version`.
 
-### Option C: Install Script for Windows (PowerShell)
+### Method C — Install Script for Windows PowerShell (`install.ps1`)
 
-Windows CMD and PowerShell do not execute POSIX shell scripts natively. Use the official PowerShell installer in Windows PowerShell or PowerShell 7:
+Windows CMD and PowerShell do not execute POSIX shell scripts natively. Run the PowerShell installer in Windows PowerShell or PowerShell 7:
 
 ```powershell
 irm https://raw.githubusercontent.com/devlopergit04/Obsidian-Telemetry/main/install.ps1 | iex
 ```
 
-Or download and run locally:
+Or inspect and run locally:
 
 ```powershell
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/devlopergit04/Obsidian-Telemetry/main/install.ps1 -OutFile install.ps1
@@ -75,11 +72,7 @@ Invoke-WebRequest -Uri https://raw.githubusercontent.com/devlopergit04/Obsidian-
 
 ## CLI Usage
 
-The primary CLI executable is `ot`.
-
-### Startup Output
-
-Running `ot` (or `ot start`) starts the background service on `0.0.0.0:1392` by default and prints the access details:
+The executable command across Linux, macOS, and Windows is `ot`.
 
 ```text
 Obsidian Telemetry
@@ -97,153 +90,117 @@ Initial Administrator Credentials (shown once):
   Password: <generated-once-on-first-boot>
 ```
 
-On another machine on your local network or VPS, open:
-
-```text
-http://SERVER-IP:1392
-```
+Remote access on LAN or VPN hosts defaults to `http://SERVER-IP:1392`. For HTTPS domain deployments, see [Reverse Proxies & TLS](./docs/03-reverse-proxy-tls-and-systemd.md).
 
 ### Commands
 
-| Command        | Description                                                                          |
-| :------------- | :----------------------------------------------------------------------------------- |
-| `ot`           | Start Obsidian Telemetry on the configured host/port (default `0.0.0.0:1392`).       |
-| `ot start`     | Explicitly start the background service.                                             |
-| `ot stop`      | Gracefully stop the running Obsidian Telemetry service (`SIGTERM`).                  |
-| `ot restart`   | Stop and cleanly restart Obsidian Telemetry.                                         |
-| `ot status`    | Report whether the backend is running, its PID, bound host/port, and dashboard URL.  |
-| `ot update`    | Update `obsidian-telemetry` to the latest release and restart if previously running. |
-| `ot uninstall` | Stop the service and remove Obsidian Telemetry managed files after confirmation.     |
+| Command             | Description                                                                                                 |
+| :------------------ | :---------------------------------------------------------------------------------------------------------- |
+| `ot` / `ot start`   | Start Obsidian Telemetry on `0.0.0.0:1392` (fails fast if another process owns the port).                   |
+| `ot stop`           | Gracefully terminate the background daemon (`SIGTERM` + PID cleanup).                                       |
+| `ot restart`        | Stop and cleanly relaunch the background service.                                                           |
+| `ot status`         | Report running state, PID, listening address, auth mode, and reachable dashboard URLs.                      |
+| `ot update`         | Safely stop the running daemon (preventing Windows file locks), upgrade via npm, and restart cleanly.       |
+| `ot backup [file]`  | Export config, credentials, triage state, and audit logs into a SHA-256 checksummed JSON archive (`0600`).  |
+| `ot restore <file>` | Verify SHA-256 integrity via `crypto.timingSafeEqual` and restore state safely with `.bak` recovery points. |
+| `ot passwd [user]`  | Update or rotate local user password hashes (`scrypt`) interactively or via `--password`.                   |
+| `ot uninstall`      | Stop the service and remove Obsidian Telemetry managed directories and package after confirmation.          |
 
-### Options
-
-| Flag                | Description                                                                                                     |
-| :------------------ | :-------------------------------------------------------------------------------------------------------------- |
-| `-p, --port <port>` | Override HTTP listening port (default `1392`, or `OT_PORT`). Port conflicts fail fast without silent switching. |
-| `-H, --host <host>` | Override bind interface (default `0.0.0.0`, or `OT_HOST`).                                                      |
-| `-f, --foreground`  | Attach process logs directly to the current terminal instead of daemonizing.                                    |
-| `-y, --yes`         | Skip interactive confirmation for `ot uninstall`.                                                               |
-| `-v, --version`     | Display installed package version.                                                                              |
-| `-h, --help`        | Show CLI usage help.                                                                                            |
+Options: `-p, --port <port>`, `-H, --host <host>`, `-f, --foreground`, `-y, --yes`, `--password <value>`, `-v, --version`, `-h, --help`.
 
 ---
 
-## Persistent Storage
+## Operator Personas
 
-Obsidian Telemetry stores persistent runtime data in platform-standard locations (override anytime with `OT_HOME`):
+Original SVG character system designed for Obsidian Telemetry documentation (pure vector SVG, reduced-motion aware, zero external assets):
 
-| Platform    | Configuration & Credentials                               | Runtime State, Audit Log, PID & Logs               |
-| :---------- | :-------------------------------------------------------- | :------------------------------------------------- |
-| **Linux**   | `~/.config/obsidian-telemetry`                            | `~/.local/share/obsidian-telemetry`                |
-| **macOS**   | `~/Library/Application Support/Obsidian Telemetry/config` | `~/Library/Application Support/Obsidian Telemetry` |
-| **Windows** | `%APPDATA%\Obsidian Telemetry`                            | `%LOCALAPPDATA%\Obsidian Telemetry`                |
-
-Managed files:
-
-- `credentials.json` (`0600` on POSIX) — persistent 256-bit HMAC session secret and salted `scrypt` password hashes.
-- `config.json` — optional persisted server defaults.
-- `state.json` — persistent operator incident acknowledgements and local triage state.
-- `audit.jsonl` — append-only JSONL audit log for logins, denials, WebSocket streams, and cluster operations.
-- `obsidian.pid` — active process metadata (`pid`, `host`, `port`, `startedAt`, `version`).
-- `logs/server.log` — background daemon output log.
-
-JSON state files include `schemaVersion` metadata and create `.bak` backups automatically before schema upgrades.
+<table>
+  <tr>
+    <td align="center" width="25%"><img src="./.github/assets/char-explorer.svg" alt="Infrastructure Explorer" width="100%" /><br /><sub><a href="./docs/01-introduction-and-quickstart.md">Start &amp; Discovery</a></sub></td>
+    <td align="center" width="25%"><img src="./.github/assets/char-engineer.svg" alt="Server Engineer" width="100%" /><br /><sub><a href="./docs/02-cli-and-networking.md">CLI &amp; Networking</a></sub></td>
+    <td align="center" width="25%"><img src="./.github/assets/char-observer.svg" alt="Monitoring Observer" width="100%" /><br /><sub><a href="./docs/07-kubernetes-and-prometheus.md">Telemetry &amp; PromQL</a></sub></td>
+    <td align="center" width="25%"><img src="./.github/assets/char-k8s-operator.svg" alt="Kubernetes Operator" width="100%" /><br /><sub><a href="./docs/09-deployment-containers-and-k8s.md">Kubernetes RBAC</a></sub></td>
+  </tr>
+  <tr>
+    <td align="center" width="25%"><img src="./.github/assets/char-network-architect.svg" alt="Network Architect" width="100%" /><br /><sub><a href="./docs/03-reverse-proxy-tls-and-systemd.md">Proxies &amp; Ingress</a></sub></td>
+    <td align="center" width="25%"><img src="./.github/assets/char-security-guardian.svg" alt="Security Guardian" width="100%" /><br /><sub><a href="./docs/06-authentication-security-and-rbac.md">Auth &amp; Security</a></sub></td>
+    <td align="center" width="25%"><img src="./.github/assets/char-data-caretaker.svg" alt="Data Caretaker" width="100%" /><br /><sub><a href="./docs/10-operations-backup-and-upgrades.md">Backup &amp; Recovery</a></sub></td>
+    <td align="center" width="25%"><img src="./.github/assets/char-deployment-engineer.svg" alt="Deployment Engineer" width="100%" /><br /><sub><a href="./docs/11-testing-and-ci.md">CI Matrix &amp; Releases</a></sub></td>
+  </tr>
+</table>
 
 ---
 
 ## Architecture
 
-```
-Browser (React 19 + Tailwind)
-   │  REST (/api/*) + HttpOnly Cookie Auth + CSRF + WebSocket (/ws/logs, /ws/exec)
-   ▼
-Obsidian Telemetry CLI & Server (dist-server/src/cli/ot.js -> dist-server/server.js)
-   ├── Platform & StateStore       (Cross-platform paths, scrypt users, state.json, audit.jsonl)
-   ├── Auth & CSRF Middleware      (HMAC-SHA256 cookies, timing-safe tokens, X-CSRF-Token)
-   ├── KubernetesService           (@kubernetes/client-node v2, SelfSubjectAccessReview)
-   ├── PrometheusService           (/api/v1/query, query_range, rules, buildinfo)
-   ├── IncidentService             (Persistent alert triage merged with live cluster signals)
-   ├── DemoProvider                (Isolated opt-in synthetic mode when mode=demo)
-   └── WebSocket Hub (wsHub.ts)    (Origin-checked live pod logs & admin-gated exec)
-```
-
 <div align="center">
   <img src="./.github/assets/architecture-flow.svg" alt="Animated System Architecture Diagram" width="100%" />
 </div>
 
-### Core Views (`01` - `06`)
+### Core Console Views (`01` - `06`)
 
-| Index | View                   | Capabilities                                                                                                                                                                                                                       |
-| :---- | :--------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `01`  | **Cluster Overview**   | Disconnected configuration guide when unlinked; 4-column Prometheus telemetry strip (`CPU`, `Memory`, `Network Mbps`, `P99 Latency`); interactive SVG time-series chart (`15m`, `1h`, `6h`, `24h`); live node health matrix.       |
-| `02`  | **Nodes & Workloads**  | Search and namespace/status filtering; expandable node rows with scheduled pods; Deployment scale and rollout restart; Node `Cordon`/`Uncordon`, PDB-checked `Drain`, and `Delete Pod` gated behind confirmation dialogs and RBAC. |
-| `03`  | **Container Logs**     | Namespace, pod, container, and tail-line (`100`/`250`/`500`) retrieval, live `/ws/logs` WebSocket streaming, substring/RegExp line filtering, and `.log` export.                                                                   |
-| `04`  | **Services & Ingress** | Live Kubernetes `Service` and `Ingress` inventory with interactive SVG routing graph and Service inspection.                                                                                                                       |
-| `05`  | **Incidents & PromQL** | Combines Prometheus firing/pending alerts, Warning Kubernetes events, and unhealthy pod/node states; persistent operator `Acknowledge` / `Mark Triaged` actions; interactive PromQL explorer and alerting rules table.             |
-| `06`  | **Audit Trail**        | Searchable audit view backed by persistent `audit.jsonl` recording authentication events, RBAC/CSRF rejections, WebSocket streams, and cluster operations.                                                                         |
+| View | Name                   | Capabilities                                                                                                                                                                                                        |
+| :--- | :--------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `01` | **Cluster Overview**   | Honest disconnected setup state when unlinked; 4-column Prometheus telemetry strip (`CPU`, `Memory`, `Network Mbps`, `P99 Latency`); multi-window SVG charts (`15m`, `1h`, `6h`, `24h`); live node readiness table. |
+| `02` | **Nodes & Workloads**  | Node & Pod search/filtering; Deployment scale (`0..200`) and rollout restart; Node `Cordon`/`Uncordon`, PDB-checked `Drain`, and `Delete Pod` guarded by confirmation modals and RBAC.                              |
+| `03` | **Container Logs**     | Namespace, pod, container, and tail-line retrieval; live `/ws/logs` WebSocket stream; RegExp filtering and `.log` download.                                                                                         |
+| `04` | **Services & Ingress** | Live `Service` & `Ingress` routing table with interactive SVG topology graph and inspection drawer.                                                                                                                 |
+| `05` | **Incidents & PromQL** | Correlates Prometheus alert rules, Warning Kubernetes events, and crashing workloads; persistent triage overlays; interactive PromQL query runner.                                                                  |
+| `06` | **Audit Trail**        | Searchable `audit.jsonl` operational ledger capturing logins, rate-limit lockouts, RBAC denials, WebSocket openings, and cluster writes.                                                                            |
+
+---
+
+## Persistent Storage
+
+Obsidian Telemetry stores persistent configuration, `scrypt` credentials, triage state, logs, and audit history in platform-standard user directories (overridable via `OT_HOME`):
+
+| Platform    | Config & Credentials (`0600` POSIX)                       | State, Audit, PID & Rotated Logs                   |
+| :---------- | :-------------------------------------------------------- | :------------------------------------------------- |
+| **Linux**   | `~/.config/obsidian-telemetry`                            | `~/.local/share/obsidian-telemetry`                |
+| **macOS**   | `~/Library/Application Support/Obsidian Telemetry/config` | `~/Library/Application Support/Obsidian Telemetry` |
+| **Windows** | `%APPDATA%\Obsidian Telemetry`                            | `%LOCALAPPDATA%\Obsidian Telemetry`                |
+
+<div align="center">
+  <img src="./.github/assets/diagram-storage-lifecycle.svg" alt="Storage & Crash Recovery Pipeline" width="100%" />
+</div>
+
+All JSON mutations use UUID-nonced atomic temp-rename writes (`<file>.<pid>.<ts>.<uuid>.tmp`), preserve validated `.bak` snapshots, quarantine unreadable payloads to `*.corrupt.<ts>`, and rotate `logs/server.log` at `5 MiB`.
 
 ---
 
 ## Security Model
 
-- **Authenticated by Default in Production & CLI Mode**: `ot` defaults `AUTH_MODE=token`, automatically generating a random initial password for the `admin` account stored exclusively as a salted `scrypt` hash (`credentials.json`, mode `0600`). Passwords can be updated inside the **Session & RBAC Authentication** dialog.
-- **Role-Based Access Control**: Supports both local user accounts (`username` + `password`) and static bearer tokens (`OBSIDIAN_ADMIN_TOKEN`, `OBSIDIAN_OPERATOR_TOKEN`, `OBSIDIAN_VIEWER_TOKEN`) validated via `crypto.timingSafeEqual`.
-- **HttpOnly Cookies & CSRF Protection**: Logins set an `HttpOnly`, `SameSite=Strict` HMAC-SHA256 signed session cookie (automatically marking `Secure` on HTTPS or TLS-terminated `X-Forwarded-Proto: https`, while functioning cleanly on local/LAN HTTP `http://SERVER-IP:1392`). Cookie-authenticated `POST`/`DELETE` mutations require an in-memory `X-CSRF-Token` header verified via HMAC.
-- **WebSocket Protection**: Upgrade handshakes verify `Origin` headers against the request host or `CORS_ORIGIN` allowlist and enforce token/session authentication before opening log or exec streams.
-- **Safe Operational Guardrails**: `ENABLE_POD_EXEC` is `false` by default, demo mode blocks all mutations (`400 Bad Request`), and Express enforces `helmet`, strict CORS, `64kb` JSON limits, `express-rate-limit` (RFC 7239 `Forwarded` / `X-Forwarded-For` aware), and `zod` input validation.
+<div align="center">
+  <img src="./.github/assets/diagram-security-pipeline.svg" alt="Security Request Pipeline" width="100%" />
+</div>
 
----
-
-## Configuration
-
-| Variable                  | Default                           | Description                                                                         |
-| :------------------------ | :-------------------------------- | :---------------------------------------------------------------------------------- |
-| `OT_HOST`                 | `0.0.0.0`                         | Listening network interface (`HOST` supported as fallback).                         |
-| `OT_PORT`                 | `1392`                            | HTTP and WebSocket port (`PORT` supported as fallback).                             |
-| `OT_HOME`                 | Platform default                  | Custom base directory for config, credentials, audit log, PID, and logs.            |
-| `OT_ADMIN_PASSWORD`       | Generated once                    | Pre-seed initial `admin` password on first bootstrap for automated installs.        |
-| `CORS_ORIGIN`             | Same-host dynamic                 | Comma-separated explicit allowed browser origins.                                   |
-| `AUTH_MODE`               | `token` (prod) / `optional` (dev) | Enforce authentication (`token`) or allow anonymous read-only viewing (`optional`). |
-| `SESSION_SECRET`          | Persisted 256-bit secret          | Override HMAC session signing key.                                                  |
-| `OBSIDIAN_ADMIN_TOKEN`    | unset                             | Optional static bearer/login token for `admin`.                                     |
-| `OBSIDIAN_OPERATOR_TOKEN` | unset                             | Optional static bearer/login token for `operator`.                                  |
-| `OBSIDIAN_VIEWER_TOKEN`   | unset                             | Optional static bearer/login token for `viewer`.                                    |
-| `KUBE_MODE`               | `auto`                            | `auto`, `kubeconfig`, `incluster`, `token`, or `disabled`.                          |
-| `KUBECONFIG_PATH`         | `~/.kube/config`                  | Custom kubeconfig path.                                                             |
-| `KUBE_CONTEXT`            | current context                   | Default kubeconfig context name.                                                    |
-| `K8S_API_SERVER`          | unset                             | API server URL for `token` mode.                                                    |
-| `K8S_BEARER_TOKEN`        | unset                             | ServiceAccount bearer token for `token` mode.                                       |
-| `PROMETHEUS_URL`          | unset                             | Base Prometheus HTTP URL (e.g. `http://localhost:9090`).                            |
-| `ENABLE_POD_EXEC`         | `false`                           | Enables `/ws/exec` for authenticated `admin` accounts when `true`.                  |
-| `ENABLE_DEMO_MODE`        | `true`                            | Allows explicitly switching to synthetic demo mode when disconnected.               |
+- **Secure by Default**: `ot` and `NODE_ENV=production` default to `AUTH_MODE=token`, generate a salted `scrypt` password for `admin`, forbid placeholder `SESSION_SECRET` / `OBSIDIAN_*_TOKEN` strings in production, and emit `Cache-Control: no-store` on every `/api/*` response.
+- **Brute-Force & Session Defense**: `/api/auth/login` and `/api/auth/password` enforce both a sliding IP window (`30 req / 15m`) and per-`IP:actor` failure lockouts (`5` failures -> `60s` HTTP `429` + `Retry-After`). Password updates immediately rotate both the `HttpOnly`, `SameSite=Strict` HMAC cookie and `X-CSRF-Token`.
+- **Execution Guardrails**: `ENABLE_POD_EXEC` is `false` by default, Demo Mode blocks all cluster mutations (`400 Bad Request`), and Kubernetes errors strip any `Bearer <token>` substrings before logging or returning responses.
 
 ---
 
 ## Deployment
 
-### Source Build & Local Execution
+### Source Build & Local Development
 
 ```bash
 git clone https://github.com/devlopergit04/Obsidian-Telemetry.git
 cd Obsidian-Telemetry
 npm install
+npm run dev     # Vite HMR-free preview + Express dev server
+# or production build & CLI:
 npm run build
-node dist-server/cli/ot.js
-```
-
-For hot-reload frontend development:
-
-```bash
-npm run dev
+node dist-server/src/cli/ot.js
 ```
 
 ### Docker Compose (App + Prometheus)
 
 ```bash
-docker compose up --build
+SESSION_SECRET="$(openssl rand -hex 32)" docker compose up -d --build
 ```
 
-Starts Prometheus on `http://localhost:9090` and Obsidian Telemetry on `http://localhost:1392` with persistent container state in the `obsidian_state` volume.
+Requires an explicit 32+ character `SESSION_SECRET` (zero hardcoded fallback secrets) and defaults `KUBE_MODE=disabled` until a kubeconfig volume is intentionally mounted.
 
 ### Kubernetes In-Cluster Deployment
 
@@ -255,36 +212,55 @@ kubectl create secret generic obsidian-telemetry-secrets \
   --from-literal=admin-token="$(openssl rand -hex 24)" \
   --from-literal=operator-token="$(openssl rand -hex 24)"
 
-kubectl apply -f deploy/kubernetes/rbac.yaml
+kubectl apply -f deploy/kubernetes/pvc.yaml
+kubectl apply -f deploy/kubernetes/rbac.yaml           # Read-only viewer permissions by default
+# kubectl apply -f deploy/kubernetes/rbac-operator.yaml  # Opt-in node/pod/deployment mutations
 kubectl apply -f deploy/kubernetes/deployment.yaml
 ```
 
 ---
 
-## Testing
+## Complete Documentation Book
 
-```bash
-npm run lint          # TypeScript strict type-check (tsc --noEmit)
-npm run lint:code     # Oxlint static analysis (--deny-warnings)
-npm run format:check  # Prettier formatting check
-npm test              # Vitest unit, API integration, persistence, and UI tests
-npm run build         # Production Vite frontend + compiled dist-server backend & CLI
-```
+| Chapter | Guide                                                                                  | Key Topics                                                                 |
+| :------ | :------------------------------------------------------------------------------------- | :------------------------------------------------------------------------- |
+| **01**  | [Introduction & Quick Start](./docs/01-introduction-and-quickstart.md)                 | Philosophy, requirements, npm / `install.sh` / `install.ps1`               |
+| **02**  | [CLI Reference & Network Binding](./docs/02-cli-and-networking.md)                     | `ot` commands, flags, `0.0.0.0:1392`, SSH tunnels & LAN access             |
+| **03**  | [Reverse Proxies, TLS & Autostart](./docs/03-reverse-proxy-tls-and-systemd.md)         | Nginx, Caddy, Apache, Traefik, systemd, launchd, Windows Task Scheduler    |
+| **04**  | [Architecture & Tech Stack](./docs/04-architecture-and-stack.md)                       | Layer design, storage lifecycle, dependency rationale                      |
+| **05**  | [Frontend Views & Controls](./docs/05-frontend-and-views.md)                           | Views `01`–`06`, AuthModal, CommandPalette, Drawers                        |
+| **06**  | [Configuration, Auth & Security](./docs/06-authentication-security-and-rbac.md)        | All env vars, directories, `scrypt`, HMAC, CSRF, RBAC, hardening checklist |
+| **07**  | [Kubernetes & Prometheus](./docs/07-kubernetes-and-prometheus.md)                      | `KUBE_MODE` strategies, timeouts, PDB drain, PromQL queries                |
+| **08**  | [REST API & WebSocket Protocol](./docs/08-api-and-websockets.md)                       | All routes, Zod schemas, `/ws/logs`, `/ws/exec` framing                    |
+| **09**  | [Docker & Kubernetes Manifests](./docs/09-deployment-containers-and-k8s.md)            | Compose security, PVC, split viewer/operator RBAC                          |
+| **10**  | [Backup, Restore, Upgrades & Uninstall](./docs/10-operations-backup-and-upgrades.md)   | `ot backup`, `ot restore`, `ot update`, `ot passwd`, `ot uninstall`        |
+| **11**  | [Testing, CI/CD Matrix & Code Standards](./docs/11-testing-and-ci.md)                  | Unit/API/UI suites, multi-OS GitHub Actions matrix, release workflow       |
+| **12**  | [Limits, Troubleshooting & FAQ](./docs/12-limitations-troubleshooting-and-faq.md)      | Scaling bounds, metrics-server, common errors, FAQ                         |
+| **13**  | [Contributing, Governance & Roadmap](./docs/13-governance-contributing-and-roadmap.md) | PR checklist, disclosure policy, MIT license, `CHANGELOG`, roadmap         |
 
 ---
 
-## Known Limitations
+## Testing
 
-- **Prometheus Query Names**: Built-in KPI series query standard `node_exporter` and HTTP histogram metrics (`node_cpu_seconds_total`, `node_memory_MemAvailable_bytes`, `node_network_receive_bytes_total`, `http_requests_total`, `http_request_duration_seconds_bucket`). Missing series render `Unavailable` while custom queries work via the PromQL explorer.
-- **Metrics Server Dependency**: Per-node and per-pod live CPU/memory metrics require Kubernetes `metrics-server` (`metrics.k8s.io/v1beta1`); otherwise inventory cells show `n/a`.
-- **Single-Host Persistence**: State persistence (`state.json`, `audit.jsonl`, `credentials.json`) targets single-node self-hosted deployments rather than multi-replica shared database clusters.
+<div align="center">
+  <img src="./.github/assets/diagram-ci-matrix.svg" alt="Cross-Platform CI Verification Matrix" width="100%" />
+</div>
+
+```bash
+npm run format:check  # Prettier formatting check
+npm run lint          # TypeScript strict type-check (tsc --noEmit)
+npm run lint:code     # Oxlint static analysis (--deny-warnings)
+npm test              # Vitest unit, API integration, persistence, and UI suites
+npm run build         # Production Vite client + compiled dist-server backend & CLI
+```
 
 ---
 
 ## Contributing & License
 
-Obsidian Telemetry is open-source software released under the [MIT License](./LICENSE).
+Obsidian Telemetry is free, open-source software released under the [MIT License](./LICENSE).
 
 - [CONTRIBUTING.md](./CONTRIBUTING.md)
 - [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
 - [SECURITY.md](./SECURITY.md)
+- [CHANGELOG.md](./CHANGELOG.md)

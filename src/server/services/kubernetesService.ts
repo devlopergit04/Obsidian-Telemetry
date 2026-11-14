@@ -172,6 +172,36 @@ export interface KubernetesSnapshotData {
   derivedIncidents: IncidentItem[];
 }
 
+const K8S_REQUEST_TIMEOUT_MS = 10_000;
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  label: string,
+  timeoutMs = K8S_REQUEST_TIMEOUT_MS
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Kubernetes API request timed out after ${timeoutMs}ms (${label})`));
+    }, timeoutMs);
+    timer.unref?.();
+    promise.then(
+      (val) => {
+        clearTimeout(timer);
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      }
+    );
+  });
+}
+
+function sanitizeK8sError(err: unknown, fallback: string): string {
+  const raw = err instanceof Error ? err.message : fallback;
+  return raw.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]');
+}
+
 export class KubernetesService {
   private readonly config: AppConfig;
 
@@ -435,23 +465,26 @@ export class KubernetesService {
         nodeMetricsList,
         podMetricsList,
         rbac,
-      ] = await Promise.all([
-        coreApi.listNode(),
-        coreApi.listPodForAllNamespaces(),
-        coreApi.listNamespace(),
-        appsApi.listDeploymentForAllNamespaces(),
-        appsApi.listStatefulSetForAllNamespaces(),
-        appsApi.listDaemonSetForAllNamespaces(),
-        coreApi.listServiceForAllNamespaces(),
-        netApi.listIngressForAllNamespaces().catch(() => ({ items: [] as k8s.V1Ingress[] })),
-        coreApi.listEventForAllNamespaces().catch(() => ({ items: [] as k8s.CoreV1Event[] })),
-        policyApi
-          .listPodDisruptionBudgetForAllNamespaces()
-          .catch(() => ({ items: [] as k8s.V1PodDisruptionBudget[] })),
-        metricsClient.getNodeMetrics().catch(() => null),
-        metricsClient.getPodMetrics().catch(() => null),
-        this.inspectRbac(kc),
-      ]);
+      ] = await withTimeout(
+        Promise.all([
+          coreApi.listNode(),
+          coreApi.listPodForAllNamespaces(),
+          coreApi.listNamespace(),
+          appsApi.listDeploymentForAllNamespaces(),
+          appsApi.listStatefulSetForAllNamespaces(),
+          appsApi.listDaemonSetForAllNamespaces(),
+          coreApi.listServiceForAllNamespaces(),
+          netApi.listIngressForAllNamespaces().catch(() => ({ items: [] as k8s.V1Ingress[] })),
+          coreApi.listEventForAllNamespaces().catch(() => ({ items: [] as k8s.CoreV1Event[] })),
+          policyApi
+            .listPodDisruptionBudgetForAllNamespaces()
+            .catch(() => ({ items: [] as k8s.V1PodDisruptionBudget[] })),
+          metricsClient.getNodeMetrics().catch(() => null),
+          metricsClient.getPodMetrics().catch(() => null),
+          this.inspectRbac(kc),
+        ]),
+        'cluster snapshot'
+      );
 
       const nodeMetricMap = new Map<string, { cpuM: number; memMiB: number }>();
       for (const nm of nodeMetricsList?.items || []) {
@@ -791,7 +824,7 @@ export class KubernetesService {
         derivedIncidents,
       };
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Kubernetes API request failed';
+      const message = sanitizeK8sError(err, 'Kubernetes API request failed');
       const errorSummary: ClusterSummary = {
         id: currentCtxName || 'error-cluster',
         name: currentCtxName || 'kubernetes-cluster',
@@ -1034,14 +1067,17 @@ export class KubernetesService {
   ): Promise<string> {
     const kc = this.getRequiredClient(contextOverride);
     const coreApi = kc.makeApiClient(k8s.CoreV1Api);
-    const logText = await coreApi.readNamespacedPodLog({
-      name: podName,
-      namespace,
-      container,
-      tailLines,
-      sinceSeconds,
-      timestamps: true,
-    });
+    const logText = await withTimeout(
+      coreApi.readNamespacedPodLog({
+        name: podName,
+        namespace,
+        container,
+        tailLines,
+        sinceSeconds,
+        timestamps: true,
+      }),
+      'pod logs'
+    );
     return typeof logText === 'string' ? logText : String(logText || '');
   }
 
@@ -1057,7 +1093,10 @@ export class KubernetesService {
 
     let obj: Record<string, unknown>;
     if (kind === 'node') {
-      obj = (await coreApi.readNode({ name })) as unknown as Record<string, unknown>;
+      obj = (await withTimeout(coreApi.readNode({ name }), 'read node')) as unknown as Record<
+        string,
+        unknown
+      >;
     } else if (kind === 'pod') {
       obj = (await coreApi.readNamespacedPod({
         name,

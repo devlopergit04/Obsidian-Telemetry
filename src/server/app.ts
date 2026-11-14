@@ -128,7 +128,55 @@ export function createApp(services: AppServices): express.Express {
     keyGenerator: (req) => ipKeyGenerator(extractClientIp(req)),
     message: { error: 'Rate limit exceeded. Please retry shortly.' },
   });
+  const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 30,
+    standardHeaders: true,
+    legacyHeaders: false,
+    keyGenerator: (req) => ipKeyGenerator(extractClientIp(req)),
+    message: { error: 'Too many authentication attempts. Please retry later.' },
+  });
+  const authFailures = new Map<string, { count: number; lockedUntil: number }>();
+  const MAX_CONSECUTIVE_FAILURES = 5;
+  const LOCKOUT_MS = 60_000;
+
+  const getFailureKey = (req: Request, actorHint?: string): string => {
+    const ip = extractClientIp(req);
+    return actorHint ? `${ip}:${actorHint.toLowerCase()}` : ip;
+  };
+
+  const checkLockout = (key: string): number => {
+    const entry = authFailures.get(key);
+    if (!entry) return 0;
+    if (entry.lockedUntil > Date.now()) {
+      return Math.ceil((entry.lockedUntil - Date.now()) / 1000);
+    }
+    if (entry.lockedUntil > 0 && entry.lockedUntil <= Date.now()) {
+      authFailures.delete(key);
+    }
+    return 0;
+  };
+
+  const recordFailure = (key: string): void => {
+    const prev = authFailures.get(key);
+    const nextCount = (prev?.count || 0) + 1;
+    authFailures.set(key, {
+      count: nextCount,
+      lockedUntil: nextCount >= MAX_CONSECUTIVE_FAILURES ? Date.now() + LOCKOUT_MS : 0,
+    });
+  };
+
+  const clearFailures = (key: string): void => {
+    authFailures.delete(key);
+  };
+
+  app.use('/api', (_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('Cache-Control', 'no-store');
+    next();
+  });
   app.use('/api', limiter);
+  app.use('/api/auth/login', authLimiter);
+  app.use('/api/auth/password', authLimiter);
   app.use(attachAuthMiddleware(config));
   app.use('/api', requireCsrfForCookieMutations(config, auditLogger));
 
@@ -157,6 +205,27 @@ export function createApp(services: AppServices): express.Express {
       return;
     }
 
+    const actorHint = 'username' in parsed.data ? parsed.data.username.trim() : 'token';
+    const failureKey = getFailureKey(req, actorHint);
+    const retryAfterSec = checkLockout(failureKey);
+    if (retryAfterSec > 0) {
+      auditLogger.record({
+        actorId: actorHint,
+        actorRole: 'viewer',
+        action: 'AUTH_LOGIN',
+        target: 'session',
+        clusterId: 'global',
+        outcome: 'denied',
+        detail: `Login temporarily locked due to repeated failures (retry in ${retryAfterSec}s)`,
+        ip: extractClientIp(req),
+      });
+      res.setHeader('Retry-After', String(retryAfterSec));
+      res.status(429).json({
+        error: `Too many failed login attempts. Retry in ${retryAfterSec} seconds.`,
+      });
+      return;
+    }
+
     let resolved: { role: 'viewer' | 'operator' | 'admin'; actorId: string } | null = null;
     let authDetail = '';
 
@@ -178,6 +247,7 @@ export function createApp(services: AppServices): express.Express {
     }
 
     if (!resolved) {
+      recordFailure(failureKey);
       auditLogger.record({
         actorId: 'unauthenticated',
         actorRole: 'viewer',
@@ -191,6 +261,8 @@ export function createApp(services: AppServices): express.Express {
       res.status(401).json({ error: 'Invalid credentials' });
       return;
     }
+
+    clearFailures(failureKey);
 
     const cookieVal = signSessionCookie(
       {
@@ -283,6 +355,26 @@ export function createApp(services: AppServices): express.Express {
         return;
       }
       stateStore.setUserPassword(verified.username, parsed.data.newPassword, verified.role);
+
+      const rotatedCookie = signSessionCookie(
+        {
+          role: verified.role,
+          actorId: verified.username,
+          exp: Date.now() + 8 * 60 * 60 * 1000,
+        },
+        config.sessionSecret
+      );
+      const rotatedCsrfToken = deriveCsrfToken(rotatedCookie, config.sessionSecret);
+      const isSecureRequest = req.secure || req.headers['x-forwarded-proto'] === 'https';
+
+      res.cookie(SESSION_COOKIE_NAME, rotatedCookie, {
+        httpOnly: true,
+        sameSite: 'strict',
+        secure: isSecureRequest,
+        maxAge: 8 * 60 * 60 * 1000,
+        path: '/',
+      });
+
       auditLogger.record({
         actorId: verified.username,
         actorRole: verified.role,
@@ -290,10 +382,10 @@ export function createApp(services: AppServices): express.Express {
         target: verified.username,
         clusterId: 'global',
         outcome: 'succeeded',
-        detail: 'Updated local scrypt password hash',
+        detail: 'Updated local scrypt password hash and rotated session',
         ip: extractClientIp(req),
       });
-      res.json({ ok: true });
+      res.json({ ok: true, csrfToken: rotatedCsrfToken });
     }
   );
 
@@ -700,13 +792,14 @@ export function createApp(services: AppServices): express.Express {
     }
   );
 
-  // Safe Error Handler (never leaks stack traces in production)
+  // Safe Error Handler (never leaks stack traces or sensitive tokens)
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof z.ZodError) {
       res.status(400).json({ error: err.issues.map((i) => i.message).join('; ') });
       return;
     }
-    const message = err instanceof Error ? err.message : 'Internal server error';
+    const rawMessage = err instanceof Error ? err.message : 'Internal server error';
+    const message = rawMessage.replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]');
     const statusCode =
       message.includes('not found') || message.includes('NotFound')
         ? 404

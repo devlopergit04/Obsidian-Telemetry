@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -67,15 +68,57 @@ export function ensureDirSync(dirPath: string, mode = 0o700): void {
 
 export function writeFileAtomicSync(filePath: string, content: string, mode?: number): void {
   ensureDirSync(path.dirname(filePath));
-  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode });
-  fs.renameSync(tmpPath, filePath);
-  if (mode !== undefined && process.platform !== 'win32') {
-    try {
-      fs.chmodSync(filePath, mode);
-    } catch {
-      // Ignore chmod errors on filesystems that do not support POSIX modes
+  const nonce = crypto.randomUUID().slice(0, 8);
+  const tmpPath = `${filePath}.${process.pid}.${Date.now()}.${nonce}.tmp`;
+  try {
+    fs.writeFileSync(tmpPath, content, { encoding: 'utf8', mode });
+    fs.renameSync(tmpPath, filePath);
+    if (mode !== undefined && process.platform !== 'win32') {
+      try {
+        fs.chmodSync(filePath, mode);
+      } catch {
+        // Ignore chmod errors on filesystems that do not support POSIX modes
+      }
     }
+  } catch (err) {
+    try {
+      if (fs.existsSync(tmpPath)) {
+        fs.unlinkSync(tmpPath);
+      }
+    } catch {
+      // Ignore temp file cleanup errors
+    }
+    throw err;
+  }
+}
+
+export function rotateLogIfNeededSync(
+  logFilePath: string,
+  maxBytes = 5 * 1024 * 1024,
+  maxArchives = 3
+): boolean {
+  if (!fs.existsSync(logFilePath)) {
+    return false;
+  }
+  try {
+    const stat = fs.statSync(logFilePath);
+    if (stat.size < maxBytes) {
+      return false;
+    }
+
+    for (let idx = maxArchives; idx >= 1; idx -= 1) {
+      const target = `${logFilePath}.${idx}`;
+      if (idx === maxArchives && fs.existsSync(target)) {
+        fs.unlinkSync(target);
+      }
+      const prev = idx === 1 ? logFilePath : `${logFilePath}.${idx - 1}`;
+      if (fs.existsSync(prev)) {
+        fs.renameSync(prev, target);
+      }
+    }
+    return true;
+  } catch {
+    return false;
   }
 }
 

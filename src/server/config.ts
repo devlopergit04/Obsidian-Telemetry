@@ -6,6 +6,20 @@ import { StateStore } from './services/stateStore.ts';
 
 let dotenvLoaded = false;
 
+const OptionalUrlSchema = z
+  .string()
+  .optional()
+  .transform((v) => v?.trim() || undefined)
+  .refine((v) => {
+    if (!v) return true;
+    try {
+      const parsed = new URL(v);
+      return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+    } catch {
+      return false;
+    }
+  }, 'URL must be a valid http:// or https:// endpoint');
+
 const EnvSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   OT_HOST: z.string().optional(),
@@ -22,13 +36,13 @@ const EnvSchema = z.object({
   KUBE_MODE: z.enum(['auto', 'kubeconfig', 'incluster', 'token', 'disabled']).optional(),
   KUBECONFIG_PATH: z.string().optional(),
   KUBE_CONTEXT: z.string().optional(),
-  K8S_API_SERVER: z.string().optional(),
+  K8S_API_SERVER: OptionalUrlSchema,
   K8S_BEARER_TOKEN: z.string().optional(),
   K8S_SKIP_TLS_VERIFY: z
     .string()
     .optional()
     .transform((v) => v === 'true'),
-  PROMETHEUS_URL: z.string().optional(),
+  PROMETHEUS_URL: OptionalUrlSchema,
   PROMETHEUS_BEARER_TOKEN: z.string().optional(),
   PROMETHEUS_TIMEOUT_MS: z.coerce.number().int().min(500).max(30000).default(5000),
   ENABLE_POD_EXEC: z
@@ -73,10 +87,26 @@ export interface AppConfig {
   generatedAdminPassword?: string;
 }
 
-function isPlaceholder(val?: string): boolean {
+const KNOWN_PLACEHOLDER_PREFIXES = ['replace-with-', 'change-me-', 'changeme', 'example-', 'your-'];
+const KNOWN_PLACEHOLDER_EXACT = new Set([
+  'secret',
+  'password',
+  'admin',
+  'token',
+  'changeme',
+  'change-me',
+  'replace-me',
+]);
+
+export function isPlaceholder(val?: string): boolean {
   if (!val) return true;
   const trimmed = val.trim();
-  return trimmed.length === 0 || trimmed.startsWith('replace-with-');
+  if (!trimmed) return true;
+  const lower = trimmed.toLowerCase();
+  if (KNOWN_PLACEHOLDER_EXACT.has(lower)) return true;
+  if (KNOWN_PLACEHOLDER_PREFIXES.some((prefix) => lower.startsWith(prefix))) return true;
+  if (trimmed.startsWith('<') && trimmed.endsWith('>')) return true;
+  return false;
 }
 
 export function loadConfig(envSource: Record<string, string | undefined> = process.env): AppConfig {
@@ -86,6 +116,28 @@ export function loadConfig(envSource: Record<string, string | undefined> = proce
   }
   const parsed = EnvSchema.parse(envSource);
   const paths = resolvePlatformPaths(envSource);
+
+  const explicitSessionSecret = parsed.SESSION_SECRET?.trim();
+  if (explicitSessionSecret && parsed.NODE_ENV === 'production') {
+    if (isPlaceholder(explicitSessionSecret) || explicitSessionSecret.length < 32) {
+      throw new Error(
+        'Invalid SESSION_SECRET in production: must be at least 32 characters and not a known placeholder.'
+      );
+    }
+  }
+
+  for (const [envName, rawToken] of [
+    ['OBSIDIAN_ADMIN_TOKEN', parsed.OBSIDIAN_ADMIN_TOKEN],
+    ['OBSIDIAN_OPERATOR_TOKEN', parsed.OBSIDIAN_OPERATOR_TOKEN],
+    ['OBSIDIAN_VIEWER_TOKEN', parsed.OBSIDIAN_VIEWER_TOKEN],
+  ] as const) {
+    const trimmed = rawToken?.trim();
+    if (trimmed && parsed.NODE_ENV === 'production' && isPlaceholder(trimmed)) {
+      throw new Error(
+        `Invalid ${envName} in production: placeholder values are forbidden. Set a cryptographically random token or leave unset.`
+      );
+    }
+  }
 
   const shouldPersist =
     parsed.NODE_ENV !== 'test' ||
@@ -98,7 +150,8 @@ export function loadConfig(envSource: Record<string, string | undefined> = proce
 
   const port = parsed.OT_PORT ?? parsed.PORT ?? persistedConfig.port ?? 1392;
 
-  let sessionSecret = !isPlaceholder(parsed.SESSION_SECRET) ? parsed.SESSION_SECRET!.trim() : '';
+  let sessionSecret =
+    explicitSessionSecret && !isPlaceholder(explicitSessionSecret) ? explicitSessionSecret : '';
   let generatedAdminPassword: string | undefined;
 
   if (store) {
@@ -127,7 +180,7 @@ export function loadConfig(envSource: Record<string, string | undefined> = proce
   const kubeMode = parsed.KUBE_MODE ?? persistedConfig.kubeMode ?? 'auto';
 
   const prometheusUrl =
-    parsed.PROMETHEUS_URL?.trim().replace(/\/+$/, '') ||
+    parsed.PROMETHEUS_URL?.replace(/\/+$/, '') ||
     persistedConfig.prometheusUrl?.trim().replace(/\/+$/, '') ||
     undefined;
 
@@ -151,7 +204,7 @@ export function loadConfig(envSource: Record<string, string | undefined> = proce
     kubeMode,
     kubeconfigPath: parsed.KUBECONFIG_PATH?.trim() || undefined,
     kubeContext: parsed.KUBE_CONTEXT?.trim() || undefined,
-    k8sApiServer: parsed.K8S_API_SERVER?.trim() || undefined,
+    k8sApiServer: parsed.K8S_API_SERVER?.replace(/\/+$/, '') || undefined,
     k8sBearerToken: parsed.K8S_BEARER_TOKEN?.trim() || undefined,
     k8sSkipTlsVerify: Boolean(parsed.K8S_SKIP_TLS_VERIFY),
     prometheusUrl,

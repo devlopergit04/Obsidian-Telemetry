@@ -1,0 +1,39 @@
+# Opt-in operational Kubernetes RBAC for Obsidian Telemetry.
+# Apply ONLY if operators should execute node cordon/drain, pod deletion, or deployment scaling from the console.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: obsidian-telemetry-operator
+rules:
+  - apiGroups: ['']
+    resources: ['nodes']
+    verbs: ['patch']
+  - apiGroups: ['']
+    resources: ['pods']
+    verbs: ['delete']
+  - apiGroups: ['']
+    resources: ['pods/eviction']
+    verbs: ['create']
+  - apiGroups: ['apps']
+    resources: ['deployments']
+    verbs: ['patch']
+  - apiGroups: ['apps']
+    resources: ['deployments/scale']
+    verbs: ['get', 'patch', 'update']
+  # Optional: uncomment ONLY if ENABLE_POD_EXEC=true is intentionally enabled
+  # - apiGroups: ['']
+  #   resources: ['pods/exec']
+  #   verbs: ['create']
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: obsidian-telemetry-operator
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: obsidian-telemetry-operator
+subjects:
+  - kind: ServiceAccount
+    name: obsidian-telemetry
+    namespace: observability

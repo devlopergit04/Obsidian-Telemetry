@@ -1,3 +1,6 @@
+# Default least-privilege read-only Kubernetes RBAC for Obsidian Telemetry.
+# Apply this manifest for cluster observability without write/mutation permissions.
+# To allow node cordon/drain, pod deletion, or deployment scaling, ALSO apply rbac-operator.yaml explicitly.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -7,9 +10,8 @@ metadata:
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: obsidian-telemetry-operator
+  name: obsidian-telemetry-viewer
 rules:
-  # Read-only cluster & workload inspection
   - apiGroups: ['']
     resources:
       - namespaces
@@ -39,35 +41,15 @@ rules:
       - nodes
       - pods
     verbs: ['get', 'list']
-  # Explicit scoped operational permissions (never cluster-admin)
-  - apiGroups: ['']
-    resources: ['nodes']
-    verbs: ['patch']
-  - apiGroups: ['']
-    resources: ['pods']
-    verbs: ['delete']
-  - apiGroups: ['']
-    resources: ['pods/eviction']
-    verbs: ['create']
-  - apiGroups: ['apps']
-    resources: ['deployments']
-    verbs: ['patch']
-  - apiGroups: ['apps']
-    resources: ['deployments/scale']
-    verbs: ['get', 'patch', 'update']
-  # Optional: uncomment ONLY if ENABLE_POD_EXEC=true is intentionally enabled
-  # - apiGroups: ['']
-  #   resources: ['pods/exec']
-  #   verbs: ['create']
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: obsidian-telemetry-operator
+  name: obsidian-telemetry-viewer
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: obsidian-telemetry-operator
+  name: obsidian-telemetry-viewer
 subjects:
   - kind: ServiceAccount
     name: obsidian-telemetry

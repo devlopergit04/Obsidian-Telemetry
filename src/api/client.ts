@@ -91,11 +91,18 @@ export const apiClient = {
     return res;
   },
 
-  changePassword(currentPassword: string, newPassword: string): Promise<{ ok: boolean }> {
-    return requestJson<{ ok: boolean }>('/api/auth/password', {
+  async changePassword(
+    currentPassword: string,
+    newPassword: string
+  ): Promise<{ ok: boolean; csrfToken?: string }> {
+    const res = await requestJson<{ ok: boolean; csrfToken?: string }>('/api/auth/password', {
       method: 'POST',
       body: JSON.stringify({ currentPassword, newPassword }),
     });
+    if (res.csrfToken) {
+      inMemoryCsrfToken = res.csrfToken;
+    }
+    return res;
   },
 
   getSnapshot(params: {

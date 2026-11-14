@@ -6,13 +6,20 @@ import path from 'node:path';
 import readline from 'node:readline/promises';
 import { fileURLToPath } from 'node:url';
 import { loadConfig } from '../server/config.ts';
-import { ensureDirSync, getReachableUrls, resolvePlatformPaths } from '../server/platform.ts';
+import {
+  ensureDirSync,
+  getReachableUrls,
+  resolvePlatformPaths,
+  rotateLogIfNeededSync,
+} from '../server/platform.ts';
 import { StateStore } from '../server/services/stateStore.ts';
 
 interface CliOptions {
   command: string;
+  targetArg?: string;
   host?: string;
   port?: string;
+  password?: string;
   foreground: boolean;
   yes: boolean;
 }
@@ -21,8 +28,10 @@ function parseCli(argv: string[]): CliOptions {
   const args = [...argv];
   let command = 'start';
   let commandExplicit = false;
+  let targetArg: string | undefined;
   let host: string | undefined;
   let port: string | undefined;
+  let password: string | undefined;
   let foreground = false;
   let yes = false;
 
@@ -48,9 +57,16 @@ function parseCli(argv: string[]): CliOptions {
       i += 1;
     } else if (arg.startsWith('--host=')) {
       host = arg.slice('--host='.length);
+    } else if (arg === '--password' && args[i + 1]) {
+      password = args[i + 1];
+      i += 1;
+    } else if (arg.startsWith('--password=')) {
+      password = arg.slice('--password='.length);
     } else if (!arg.startsWith('-') && !commandExplicit) {
       command = arg;
       commandExplicit = true;
+    } else if (!arg.startsWith('-') && commandExplicit && !targetArg) {
+      targetArg = arg;
     } else {
       console.error(`Unknown option or argument: ${arg}`);
       printHelp();
@@ -58,7 +74,7 @@ function parseCli(argv: string[]): CliOptions {
     }
   }
 
-  return { command, host, port, foreground, yes };
+  return { command, targetArg, host, port, password, foreground, yes };
 }
 
 function resolvePackageRoot(): string {
@@ -99,20 +115,24 @@ Usage:
   ot [command] [options]
 
 Commands:
-  start         Start Obsidian Telemetry (default when running 'ot')
-  stop          Stop the running Obsidian Telemetry service
-  restart       Restart Obsidian Telemetry
-  status        Show service status, listening address, and dashboard URL
-  update        Update Obsidian Telemetry to the latest release
-  uninstall     Stop service and remove Obsidian Telemetry managed files
+  start                 Start Obsidian Telemetry (default when running 'ot')
+  stop                  Stop the running Obsidian Telemetry service
+  restart               Restart Obsidian Telemetry
+  status                Show service status, listening address, and dashboard URL
+  update                Update Obsidian Telemetry to the latest release
+  uninstall             Stop service and remove Obsidian Telemetry managed files
+  backup [file]         Export config, credentials, triage state, and audit trail (SHA-256 verified)
+  restore <file>        Restore Obsidian Telemetry state from a verified backup file
+  passwd [username]     Reset or update a local account password (default user: admin)
 
 Options:
-  -p, --port <port>   HTTP listening port (default: 1392, or OT_PORT)
-  -H, --host <host>   Listening bind address (default: 0.0.0.0, or OT_HOST)
-  -f, --foreground    Run server attached to current terminal
-  -y, --yes           Skip interactive confirmation prompts (for uninstall)
-  -v, --version       Print version
-  -h, --help          Show help`);
+  -p, --port <port>     HTTP listening port (default: 1392, or OT_PORT)
+  -H, --host <host>     Listening bind address (default: 0.0.0.0, or OT_HOST)
+  -f, --foreground      Run server attached to current terminal
+  -y, --yes             Skip interactive confirmation prompts (for uninstall)
+  --password <value>    Supply password non-interactively for 'ot passwd'
+  -v, --version         Print version
+  -h, --help            Show help`);
 }
 
 function isProcessAlive(pid: number): boolean {
@@ -283,7 +303,8 @@ async function cmdStart(opts: CliOptions, packageRoot: string): Promise<number> 
   }
 
   ensureDirSync(config.paths.logsDir);
-  const logFd = fs.openSync(config.paths.serverLogFile, 'a');
+  rotateLogIfNeededSync(config.paths.serverLogFile);
+  const logFd = fs.openSync(config.paths.serverLogFile, 'a', 0o600);
   const spawnArgs = useCompiled
     ? [entry, '--host', config.host, '--port', String(config.port)]
     : ['--import', 'tsx', entry, '--host', config.host, '--port', String(config.port)];
@@ -355,7 +376,7 @@ async function cmdStop(): Promise<number> {
     process.kill(pidInfo.pid, 'SIGTERM');
   } catch (err) {
     console.error(
-      `Failed to send SIGTERM to PID ${pidInfo.pid}: ${err instanceof Error ? err.message : String(err)}`
+      `Failed to terminate PID ${pidInfo.pid}: ${err instanceof Error ? err.message : String(err)}`
     );
     return 1;
   }
@@ -441,9 +462,15 @@ async function cmdUpdate(packageRoot: string, opts: CliOptions): Promise<number>
   const prevPid = store.readPid();
   const wasRunning = Boolean(prevPid && isProcessAlive(prevPid.pid));
 
+  // Stop running process before overwriting package files (prevents Windows EBUSY/EPERM locks)
+  if (wasRunning) {
+    console.log('Stopping running Obsidian Telemetry service before update...');
+    await cmdStop();
+  }
+
   const spec = process.env.OT_NPM_SPEC?.trim() || 'obsidian-telemetry@latest';
   const prefix = process.env.OT_INSTALL_PREFIX?.trim() || detectInstallPrefix(packageRoot);
-  const npmArgs = ['install', '-g', spec];
+  const npmArgs = ['install', '-g', '--no-fund', '--no-audit', spec];
   if (prefix) {
     npmArgs.push('--prefix', prefix);
   }
@@ -454,12 +481,15 @@ async function cmdUpdate(packageRoot: string, opts: CliOptions): Promise<number>
   });
   if (res.status !== 0) {
     console.error('Update failed. Check network access and npm permissions.');
+    if (wasRunning) {
+      console.log('Restoring previous Obsidian Telemetry service...');
+      await cmdStart(opts, packageRoot);
+    }
     return res.status ?? 1;
   }
 
   if (wasRunning) {
-    console.log('Restarting Obsidian Telemetry with updated release...');
-    await cmdStop();
+    console.log('Starting updated Obsidian Telemetry release...');
     return cmdStart(opts, packageRoot);
   }
 
@@ -481,6 +511,90 @@ async function confirmPrompt(question: string): Promise<boolean> {
   } finally {
     rl.close();
   }
+}
+
+async function cmdBackup(opts: CliOptions): Promise<number> {
+  const paths = resolvePlatformPaths(process.env);
+  const store = new StateStore(paths);
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const outPath = path.resolve(
+    opts.targetArg || path.join(process.cwd(), `obsidian-telemetry-backup-${timestamp}.json`)
+  );
+  const bundle = store.exportBackup(outPath);
+  console.log(`Backup written: ${outPath}`);
+  console.log(`Created:        ${bundle.createdAt}`);
+  console.log(`SHA-256:        ${bundle.checksumSha256}`);
+  return 0;
+}
+
+async function cmdRestore(opts: CliOptions): Promise<number> {
+  if (!opts.targetArg) {
+    console.error('Error: Specify a backup file path. Usage: ot restore <backup-file.json>');
+    return 1;
+  }
+  const inputPath = path.resolve(opts.targetArg);
+  if (!fs.existsSync(inputPath)) {
+    console.error(`Error: Backup file not found: ${inputPath}`);
+    return 1;
+  }
+
+  const paths = resolvePlatformPaths(process.env);
+  const store = new StateStore(paths);
+  const prevPid = store.readPid();
+  const wasRunning = Boolean(prevPid && isProcessAlive(prevPid.pid));
+
+  if (wasRunning) {
+    console.log('Stopping running Obsidian Telemetry before restore...');
+    await cmdStop();
+  }
+
+  const bundle = store.importBackup(inputPath);
+  console.log(`Restored backup created at ${bundle.createdAt} (SHA-256 verified).`);
+
+  if (wasRunning) {
+    const packageRoot = resolvePackageRoot();
+    return cmdStart(opts, packageRoot);
+  }
+  return 0;
+}
+
+async function cmdPasswd(opts: CliOptions): Promise<number> {
+  const username = (opts.targetArg || 'admin').trim().toLowerCase();
+  if (!username) {
+    console.error('Error: Invalid username.');
+    return 1;
+  }
+
+  let newPassword = opts.password?.trim() || '';
+  if (!newPassword) {
+    if (!process.stdin.isTTY) {
+      console.error(
+        'Error: Provide --password <new-password> when running ot passwd non-interactively.'
+      );
+      return 1;
+    }
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+    try {
+      newPassword = (await rl.question(`New password for '${username}' (min 8 chars): `)).trim();
+    } finally {
+      rl.close();
+    }
+  }
+
+  if (newPassword.length < 8) {
+    console.error('Error: Password must be at least 8 characters long.');
+    return 1;
+  }
+
+  const paths = resolvePlatformPaths(process.env);
+  const store = new StateStore(paths);
+  store.ensureCredentials();
+  store.setUserPassword(username, newPassword);
+  console.log(`Updated password hash for '${username}' in ${paths.credentialsFile}`);
+  return 0;
 }
 
 async function cmdUninstall(packageRoot: string, opts: CliOptions): Promise<number> {
@@ -579,6 +693,12 @@ async function main(): Promise<void> {
       process.exit(await cmdStatus());
     case 'update':
       process.exit(await cmdUpdate(packageRoot, opts));
+    case 'backup':
+      process.exit(await cmdBackup(opts));
+    case 'restore':
+      process.exit(await cmdRestore(opts));
+    case 'passwd':
+      process.exit(await cmdPasswd(opts));
     case 'uninstall':
       process.exit(await cmdUninstall(packageRoot, opts));
     default:

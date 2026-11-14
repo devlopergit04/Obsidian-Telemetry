@@ -23,20 +23,21 @@ services:
       OT_HOST: 0.0.0.0
       OT_PORT: 1392
       OT_HOME: /var/lib/obsidian-telemetry
-      CORS_ORIGIN: http://localhost:1392
+      CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:1392}
       AUTH_MODE: token
-      SESSION_SECRET: ${SESSION_SECRET:-change-me-32-byte-random-secret-key}
-      OBSIDIAN_ADMIN_TOKEN: ${OBSIDIAN_ADMIN_TOKEN:-change-me-admin-token}
-      OBSIDIAN_OPERATOR_TOKEN: ${OBSIDIAN_OPERATOR_TOKEN:-change-me-operator-token}
-      OBSIDIAN_VIEWER_TOKEN: ${OBSIDIAN_VIEWER_TOKEN:-change-me-viewer-token}
-      KUBE_MODE: ${KUBE_MODE:-kubeconfig}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET (32+ random chars) in .env before starting Docker Compose}
+      OT_ADMIN_PASSWORD: ${OT_ADMIN_PASSWORD:-}
+      OBSIDIAN_ADMIN_TOKEN: ${OBSIDIAN_ADMIN_TOKEN:-}
+      OBSIDIAN_OPERATOR_TOKEN: ${OBSIDIAN_OPERATOR_TOKEN:-}
+      OBSIDIAN_VIEWER_TOKEN: ${OBSIDIAN_VIEWER_TOKEN:-}
+      KUBE_MODE: ${KUBE_MODE:-disabled}
       KUBECONFIG_PATH: /home/obsidian/.kube/config
       PROMETHEUS_URL: http://prometheus:9090
       ENABLE_POD_EXEC: 'false'
       ENABLE_DEMO_MODE: 'true'
     volumes:
       - obsidian_state:/var/lib/obsidian-telemetry
-      # Mount your local kubeconfig read-only if connecting to an external cluster:
+      # Mount your local kubeconfig read-only and set KUBE_MODE=kubeconfig when connecting to an external cluster:
       # - ${HOME}/.kube/config:/home/obsidian/.kube/config:ro
     depends_on:
       - prometheus

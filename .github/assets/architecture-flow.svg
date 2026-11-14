@@ -1,13 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 230" width="920" height="230" role="img" aria-label="Obsidian Telemetry System Architecture">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 230" width="920" height="230" role="img" aria-labelledby="archTitle archDesc">
+  <title id="archTitle">Obsidian Telemetry System Architecture</title>
+  <desc id="archDesc">Three-stage architecture pipeline from Kubernetes, Prometheus, and Metrics Server through the Express and WebSocket RBAC backend into the 6 console views.</desc>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .ot-anim { display: none; }
+    }
+  </style>
   <rect width="920" height="230" rx="6" fill="#070A0F" stroke="#1E293B" />
 
-  <!-- Column 1: Real Infrastructure Sources -->
   <g transform="translate(24, 24)">
     <rect width="204" height="182" rx="4" fill="#0F172A" stroke="#06B6D4" stroke-opacity="0.6" />
     <text x="14" y="24" fill="#4cd7f6" font-family="ui-monospace, monospace" font-size="11" font-weight="700">INFRASTRUCTURE</text>
     <rect x="14" y="38" width="176" height="36" rx="3" fill="#1E293B" />
     <text x="24" y="54" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">Kubernetes API</text>
-    <text x="24" y="68" fill="#869397" font-family="ui-monospace, monospace" font-size="9.5">kubeconfig / incluster</text>
+    <text x="24" y="68" fill="#869397" font-family="ui-monospace, monospace" font-size="9.5">kubeconfig / incluster / token</text>
     <rect x="14" y="84" width="176" height="36" rx="3" fill="#111827" stroke="#1E293B" />
     <text x="24" y="100" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">Prometheus HTTP</text>
     <text x="24" y="114" fill="#869397" font-family="ui-monospace, monospace" font-size="9.5">PromQL &amp; Alert Rules</text>
@@ -16,35 +22,31 @@
     <text x="24" y="160" fill="#869397" font-family="ui-monospace, monospace" font-size="9.5">Optional Node/Pod CPU</text>
   </g>
 
-  <!-- Animated Flow Connector 1 -> 2 -->
   <line x1="228" y1="115" x2="292" y2="115" stroke="#06B6D4" stroke-width="2" stroke-dasharray="6 4">
-    <animate attributeName="stroke-dashoffset" from="20" to="0" dur="1.2s" repeatCount="indefinite" />
+    <animate class="ot-anim" attributeName="stroke-dashoffset" from="20" to="0" dur="1.2s" repeatCount="indefinite" />
   </line>
-  <circle cx="260" cy="115" r="3.5" fill="#22D3EE">
+  <circle class="ot-anim" cx="260" cy="115" r="3.5" fill="#22D3EE">
     <animate attributeName="cx" from="234" to="286" dur="1.8s" repeatCount="indefinite" />
   </circle>
 
-  <!-- Column 2: Express + WebSocket Backend -->
   <g transform="translate(292, 24)">
     <rect width="268" height="182" rx="4" fill="#0F172A" stroke="#1E293B" />
     <text x="14" y="24" fill="#4cd7f6" font-family="ui-monospace, monospace" font-size="11" font-weight="700">BACKEND API + RBAC</text>
-    <text x="14" y="48" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- HMAC HttpOnly Cookie Auth</text>
-    <text x="14" y="70" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- Zod Input &amp; Env Validation</text>
+    <text x="14" y="48" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- HMAC Cookie + Brute-Force Guard</text>
+    <text x="14" y="70" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- Zod Input &amp; URL Validation</text>
     <text x="14" y="92" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- PDB-Checked Node Drain</text>
     <text x="14" y="114" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- /ws/logs &amp; Gated /ws/exec</text>
-    <text x="14" y="136" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- Structured Audit Logger</text>
-    <text x="14" y="164" fill="#869397" font-family="ui-monospace, monospace" font-size="9.5">Node 22 + Express + ws</text>
+    <text x="14" y="136" fill="#dfe2ee" font-family="ui-monospace, monospace" font-size="11">- Atomic State + JSONL Audit</text>
+    <text x="14" y="164" fill="#869397" font-family="ui-monospace, monospace" font-size="9.5">Node 20+ + Express + ws (:1392)</text>
   </g>
 
-  <!-- Animated Flow Connector 2 -> 3 -->
   <line x1="560" y1="115" x2="624" y2="115" stroke="#10B981" stroke-width="2" stroke-dasharray="6 4">
-    <animate attributeName="stroke-dashoffset" from="20" to="0" dur="1.2s" repeatCount="indefinite" />
+    <animate class="ot-anim" attributeName="stroke-dashoffset" from="20" to="0" dur="1.2s" repeatCount="indefinite" />
   </line>
-  <circle cx="592" cy="115" r="3.5" fill="#4edea3">
+  <circle class="ot-anim" cx="592" cy="115" r="3.5" fill="#4edea3">
     <animate attributeName="cx" from="566" to="618" dur="1.8s" repeatCount="indefinite" />
   </circle>
 
-  <!-- Column 3: Web Console Views -->
   <g transform="translate(624, 24)">
     <rect width="272" height="182" rx="4" fill="#0F172A" stroke="#10B981" stroke-opacity="0.6" />
     <text x="14" y="24" fill="#4edea3" font-family="ui-monospace, monospace" font-size="11" font-weight="700">CONSOLE (6 VIEWS)</text>

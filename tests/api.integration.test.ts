@@ -223,9 +223,76 @@ describe('API Integration & RBAC Tests', () => {
         .set('X-Forwarded-For', '203.0.113.42')
         .set('Forwarded', 'for=203.0.113.42;proto=https');
       expect(res.status).toBe(200);
+      expect(res.headers['cache-control']).toBe('no-store');
       expect(errSpy).not.toHaveBeenCalled();
     } finally {
       errSpy.mockRestore();
+    }
+  });
+
+  it('enforces brute-force lockout (429 + Retry-After) after 5 consecutive failures and rotates CSRF on password change', async () => {
+    const tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ot-api-bruteforce-'));
+    try {
+      const baseCfg = loadConfig({
+        NODE_ENV: 'production',
+        OT_HOME: tmpHome,
+        OT_ADMIN_PASSWORD: 'correct-password-999',
+        KUBE_MODE: 'disabled',
+      });
+      const store = new StateStore(baseCfg.paths);
+      const { app } = buildTestApp(
+        {
+          NODE_ENV: 'production',
+          OT_HOME: tmpHome,
+          KUBE_MODE: 'disabled',
+        },
+        store
+      );
+
+      for (let i = 0; i < 5; i += 1) {
+        const failRes = await request(app)
+          .post('/api/auth/login')
+          .set('X-Forwarded-For', '198.51.100.25')
+          .send({ username: 'admin', password: 'wrong-password' });
+        expect(failRes.status).toBe(401);
+      }
+
+      const lockedRes = await request(app)
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', '198.51.100.25')
+        .send({ username: 'admin', password: 'correct-password-999' });
+      expect(lockedRes.status).toBe(429);
+      expect(Number(lockedRes.headers['retry-after'])).toBeGreaterThan(0);
+
+      // Separate client IP can still authenticate and rotate CSRF token on password change
+      const agent = request.agent(app);
+      const loginRes = await agent
+        .post('/api/auth/login')
+        .set('X-Forwarded-For', '198.51.100.99')
+        .send({ username: 'admin', password: 'correct-password-999' });
+      expect(loginRes.status).toBe(200);
+      const initialCsrf = loginRes.body.csrfToken as string;
+
+      const passRes = await agent
+        .post('/api/auth/password')
+        .set('X-Forwarded-For', '198.51.100.99')
+        .set('X-CSRF-Token', initialCsrf)
+        .send({
+          currentPassword: 'correct-password-999',
+          newPassword: 'rotated-strong-pass-123',
+        });
+      expect(passRes.status).toBe(200);
+      expect(passRes.body.csrfToken).toBeTruthy();
+      expect(passRes.body.csrfToken).not.toBe(initialCsrf);
+
+      // Subsequent cookie mutation using rotated CSRF token succeeds
+      const ackRes = await agent
+        .post('/api/incidents/INC-ROTATE/acknowledge')
+        .set('X-Forwarded-For', '198.51.100.99')
+        .set('X-CSRF-Token', passRes.body.csrfToken as string);
+      expect(ackRes.status).toBe(200);
+    } finally {
+      fs.rmSync(tmpHome, { recursive: true, force: true });
     }
   });
 });

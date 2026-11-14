@@ -8,10 +8,10 @@
 
 ## Security Architecture
 
-- **Secure by Default**: Standalone CLI (`ot`) and `NODE_ENV=production` launches enforce `AUTH_MODE=token` automatically, generating a salted `scrypt` password hash for the initial `admin` user and a random 256-bit HMAC session secret in `credentials.json` (`0600` file permissions on POSIX).
-- **Session Cookies & CSRF Protection**: Sessions are issued as `HttpOnly`, `SameSite=Strict` HMAC-SHA256 signed cookies (`Secure` enabled automatically when served over HTTPS or `X-Forwarded-Proto: https`). Cookie-authenticated state mutations (`POST`, `DELETE`) require an `X-CSRF-Token` header derived from the session via HMAC.
+- **Secure by Default**: Standalone CLI (`ot`) and `NODE_ENV=production` launches enforce `AUTH_MODE=token` automatically, forbid known placeholder secrets (`SESSION_SECRET`, `OBSIDIAN_*_TOKEN`), and store salted `scrypt` password hashes plus a 256-bit HMAC session secret in `credentials.json` (`0600` file permissions on POSIX).
+- **Brute-Force, Session & CSRF Defense**: Authentication routes apply sliding per-IP limits (`30 req / 15m`) plus `5`-failure consecutive lockouts (`60s` HTTP `429` with `Retry-After`). Sessions use `HttpOnly`, `SameSite=Strict` HMAC-SHA256 cookies (`Secure` when HTTPS / `X-Forwarded-Proto: https`) rotated on password change, paired with HMAC `X-CSRF-Token` validation and `Cache-Control: no-store` on `/api/*`.
 - **Strict Network Boundaries**: CORS defaults to strict same-host origin matching unless explicitly configured via `CORS_ORIGIN`. WebSocket upgrade handshakes (`/ws/logs`, `/ws/exec`) validate both `Origin` headers and authenticated roles.
-- **No Unbounded Command Execution**: `ENABLE_POD_EXEC` is `false` by default and requires authenticated `admin` role plus Kubernetes `pods/exec` RBAC permissions. CLI process control uses PID-verified signal delivery without shell string interpolation.
+- **Least-Privilege Operations**: `ENABLE_POD_EXEC` is `false` by default, upstream Kubernetes errors strip `Bearer` tokens, API calls enforce `10s` timeouts, and `deploy/kubernetes/rbac.yaml` grants read-only access while mutating RBAC lives separately in `deploy/kubernetes/rbac-operator.yaml`.
 
 ## Reporting a Vulnerability
 

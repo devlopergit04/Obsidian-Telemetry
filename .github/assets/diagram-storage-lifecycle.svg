@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 250" width="880" height="250" role="img" aria-labelledby="titleStorage descStorage">
+  <title id="titleStorage">Obsidian Telemetry Persistence &amp; Recovery Lifecycle</title>
+  <desc id="descStorage">Cross-platform storage paths, atomic temp-rename writes, .bak recovery, log rotation, and SHA-256 backup/restore bundle flow.</desc>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .ot-anim { display: none; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="bgStor" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#070A0F" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+    <clipPath id="clipStor">
+      <rect x="0" y="0" width="880" height="250" rx="6" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clipStor)">
+    <rect width="880" height="250" fill="url(#bgStor)" />
+    <text x="24" y="30" fill="#dfe2ee" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">STORAGE, ATOMIC PERSISTENCE &amp; CRASH-RECOVERY PIPELINE</text>
+    <text x="24" y="48" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="11">OT_HOME / XDG_CONFIG_HOME / macOS Application Support / Windows %APPDATA% &amp; %LOCALAPPDATA%</text>
+
+    <!-- Box 1: StateStore Caller -->
+    <rect x="24" y="74" width="166" height="106" rx="5" fill="#0B1320" stroke="#06B6D4" stroke-width="1.5" />
+    <text x="38" y="98" fill="#22D3EE" font-family="ui-monospace, monospace" font-size="11" font-weight="700">1. StateStore Write</text>
+    <text x="38" y="118" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">config.json</text>
+    <text x="38" y="135" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">credentials.json</text>
+    <text x="38" y="152" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">state.json</text>
+    <text x="38" y="169" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">mode 0o600 POSIX</text>
+
+    <!-- Arrow 1 -->
+    <line x1="190" y1="127" x2="228" y2="127" stroke="#06B6D4" stroke-width="2" />
+    <polygon points="224,122 234,127 224,132" fill="#06B6D4" />
+    <circle cx="194" cy="127" r="3" fill="#22D3EE">
+      <animate class="ot-anim" attributeName="cx" values="194;224" dur="1.8s" repeatCount="indefinite" />
+    </circle>
+
+    <!-- Box 2: Pre-Write .bak -->
+    <rect x="234" y="74" width="180" height="106" rx="5" fill="#0B1320" stroke="#10B981" stroke-width="1.5" />
+    <text x="248" y="98" fill="#4edea3" font-family="ui-monospace, monospace" font-size="11" font-weight="700">2. Verified .bak Snap</text>
+    <text x="248" y="118" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">Validate previous JSON</text>
+    <text x="248" y="135" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">Write *.json.bak</text>
+    <text x="248" y="152" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">Corrupt? Save</text>
+    <text x="248" y="169" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">*.corrupt.&lt;ts&gt; + recover</text>
+
+    <!-- Arrow 2 -->
+    <line x1="414" y1="127" x2="452" y2="127" stroke="#10B981" stroke-width="2" />
+    <polygon points="448,122 458,127 448,132" fill="#10B981" />
+
+    <!-- Box 3: Atomic Temp + Rename -->
+    <rect x="458" y="74" width="194" height="106" rx="5" fill="#0B1320" stroke="#3B82F6" stroke-width="1.5" />
+    <text x="472" y="98" fill="#93C5FD" font-family="ui-monospace, monospace" font-size="11" font-weight="700">3. Atomic Rename</text>
+    <text x="472" y="118" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">&lt;file&gt;.&lt;pid&gt;.&lt;ts&gt;.&lt;uuid&gt;.tmp</text>
+    <text x="472" y="135" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">fs.renameSync -&gt; target</text>
+    <text x="472" y="152" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">Zero partial writes</text>
+    <text x="472" y="169" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">Cleanup tmp on error</text>
+
+    <!-- Arrow 3 -->
+    <line x1="652" y1="127" x2="690" y2="127" stroke="#F59E0B" stroke-width="2" />
+    <polygon points="686,122 696,127 686,132" fill="#F59E0B" />
+
+    <!-- Box 4: Backup & Logs -->
+    <rect x="696" y="74" width="160" height="106" rx="5" fill="#0B1320" stroke="#F59E0B" stroke-width="1.5" />
+    <text x="710" y="98" fill="#FCD34D" font-family="ui-monospace, monospace" font-size="11" font-weight="700">4. Archive &amp; Logs</text>
+    <text x="710" y="118" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">ot backup [file]</text>
+    <text x="710" y="135" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">SHA-256 verified</text>
+    <text x="710" y="152" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">server.log (5MiB x3)</text>
+    <text x="710" y="169" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">audit.jsonl (2500 max)</text>
+
+    <!-- Bottom Strip -->
+    <rect x="24" y="198" width="832" height="32" rx="4" fill="#0B1320" stroke="#1E293B" />
+    <circle cx="42" cy="214" r="4" fill="#10B981">
+      <animate class="ot-anim" attributeName="opacity" values="1;0.35;1" dur="2s" repeatCount="indefinite" />
+    </circle>
+    <text x="56" y="218" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="11">ot restore &lt;bundle.json&gt; verifies checksum via crypto.timingSafeEqual before touching disk</text>
+    <rect x="0.5" y="0.5" width="879" height="249" rx="6" fill="none" stroke="#1E293B" />
+  </g>
+</svg>

@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "description": "Open-source cloud-native infrastructure observability, Kubernetes cluster telemetry, and live incident response console.",
   "license": "MIT",
+  "author": "Obsidian Telemetry Contributors",
   "repository": {
     "type": "git",
     "url": "https://github.com/devlopergit04/Obsidian-Telemetry.git"
@@ -24,6 +25,14 @@
     "tailwindcss"
   ],
   "type": "module",
+  "main": "./dist-server/src/server/app.js",
+  "types": "./dist-server/src/server/app.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist-server/src/server/app.d.ts",
+      "default": "./dist-server/src/server/app.js"
+    }
+  },
   "bin": {
     "ot": "./dist-server/src/cli/ot.js"
   },
@@ -32,7 +41,8 @@
     "dist-server",
     "README.md",
     "LICENSE",
-    "SECURITY.md"
+    "SECURITY.md",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=20.0.0"

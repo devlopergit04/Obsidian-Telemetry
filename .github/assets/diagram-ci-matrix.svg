@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 240" width="880" height="240" role="img" aria-labelledby="titleCiMatrix descCiMatrix">
+  <title id="titleCiMatrix">Obsidian Telemetry Cross-Platform CI Verification Matrix</title>
+  <desc id="descCiMatrix">Native Ubuntu Linux, Windows Server, and macOS GitHub Actions matrix testing Node 20 and Node 22 across lint, tests, npm pack, and ot CLI lifecycle.</desc>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .ot-anim { display: none; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="bgCi" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#070A0F" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+    <clipPath id="clipCi">
+      <rect x="0" y="0" width="880" height="240" rx="6" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clipCi)">
+    <rect width="880" height="240" fill="url(#bgCi)" />
+    <text x="24" y="30" fill="#dfe2ee" font-family="ui-sans-serif, system-ui, sans-serif" font-size="14" font-weight="700">CROSS-PLATFORM CI &amp; PACKAGING VERIFICATION MATRIX</text>
+    <text x="24" y="48" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="11">.github/workflows/ci.yml &amp; release.yml · Node.js 20 &amp; 22</text>
+
+    <!-- Column 1: Ubuntu -->
+    <rect x="24" y="68" width="260" height="114" rx="5" fill="#0B1320" stroke="#10B981" stroke-width="1.5" />
+    <circle cx="42" cy="88" r="4" fill="#10B981">
+      <animate class="ot-anim" attributeName="opacity" values="1;0.35;1" dur="1.7s" repeatCount="indefinite" />
+    </circle>
+    <text x="54" y="92" fill="#4edea3" font-family="ui-monospace, monospace" font-size="12" font-weight="700">ubuntu-latest (Node 20, 22)</text>
+    <text x="38" y="114" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">format, tsc, oxlint, vitest, build</text>
+    <text x="38" y="132" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">npm pack hygiene + isolated prefix</text>
+    <text x="38" y="150" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">ot start/status/restart/stop E2E</text>
+    <text x="38" y="168" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">port conflict, backup/restore, install.sh</text>
+
+    <!-- Column 2: Windows -->
+    <rect x="310" y="68" width="260" height="114" rx="5" fill="#0B1320" stroke="#3B82F6" stroke-width="1.5" />
+    <circle cx="328" cy="88" r="4" fill="#3B82F6">
+      <animate class="ot-anim" attributeName="opacity" values="1;0.35;1" dur="2.1s" repeatCount="indefinite" />
+    </circle>
+    <text x="340" y="92" fill="#93C5FD" font-family="ui-monospace, monospace" font-size="12" font-weight="700">windows-latest (Node 20, 22)</text>
+    <text x="324" y="114" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">tsc, oxlint, vitest, Vite/server build</text>
+    <text x="324" y="132" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">npm pack + ot.cmd shim installation</text>
+    <text x="324" y="150" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">ot start/status/backup/stop/restore</text>
+    <text x="324" y="168" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">install.ps1 PowerShell parser check</text>
+
+    <!-- Column 3: macOS -->
+    <rect x="596" y="68" width="260" height="114" rx="5" fill="#0B1320" stroke="#06B6D4" stroke-width="1.5" />
+    <circle cx="614" cy="88" r="4" fill="#22D3EE">
+      <animate class="ot-anim" attributeName="opacity" values="1;0.35;1" dur="2.4s" repeatCount="indefinite" />
+    </circle>
+    <text x="626" y="92" fill="#22D3EE" font-family="ui-monospace, monospace" font-size="12" font-weight="700">macos-latest (Node 20, 22)</text>
+    <text x="610" y="114" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">tsc, oxlint, vitest, Vite/server build</text>
+    <text x="610" y="132" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">npm pack + isolated prefix ot shim</text>
+    <text x="610" y="150" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="10">ot start/status/restart/stop E2E</text>
+    <text x="610" y="168" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="9">Application Support paths + install.sh</text>
+
+    <!-- Bottom Release Bar -->
+    <rect x="24" y="196" width="832" height="28" rx="4" fill="#0B1320" stroke="#1E293B" />
+    <text x="38" y="214" fill="#cbd5e1" font-family="ui-monospace, monospace" font-size="11">Tag v* -&gt; release.yml builds verified npm tarball + SHA-256 checksum artifact + GitHub Release</text>
+    <rect x="0.5" y="0.5" width="879" height="239" rx="6" fill="none" stroke="#1E293B" />
+  </g>
+</svg>

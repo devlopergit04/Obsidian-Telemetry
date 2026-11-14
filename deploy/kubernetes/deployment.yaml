@@ -91,7 +91,8 @@ spec:
               memory: 512Mi
       volumes:
         - name: state-volume
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: obsidian-telemetry-state
 ---
 apiVersion: v1
 kind: Service

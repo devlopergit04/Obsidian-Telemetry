@@ -1,4 +1,4 @@
-name: CI
+name: Cross-Platform CI
 
 on:
   push:
@@ -6,21 +6,32 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
-  verify:
+  linux:
+    name: Linux (${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js 22
+      - name: Setup Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node-version }}
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Prettier format check
+        run: npm run format:check
 
       - name: TypeScript type check
         run: npm run lint
@@ -28,11 +39,213 @@ jobs:
       - name: Oxlint check
         run: npm run lint:code
 
+      - name: Run unit, integration, and component tests
+        run: npm test
+
+      - name: Build production client and server bundles
+        run: npm run build
+
+      - name: Create and inspect npm tarball
+        run: |
+          npm pack
+          TARBALL="$(ls -1 obsidian-telemetry-*.tgz | head -n1)"
+          echo "TARBALL=${TARBALL}" >> "$GITHUB_ENV"
+          tar -tzf "$TARBALL" > tarball-files.txt
+          cat tarball-files.txt
+          grep -q '^package/dist/index.html$' tarball-files.txt
+          grep -q '^package/dist-server/src/cli/ot.js$' tarball-files.txt
+          grep -q '^package/README.md$' tarball-files.txt
+          grep -q '^package/LICENSE$' tarball-files.txt
+          grep -q '^package/CHANGELOG.md$' tarball-files.txt
+          if grep -E '^package/(\.env|tests/|node_modules/)' tarball-files.txt; then
+            echo "Unexpected secret or dev files found in tarball"
+            exit 1
+          fi
+
+      - name: Verify installer script syntax
+        run: sh -n install.sh
+
+      - name: Install package tarball in isolated prefix and test CLI lifecycle
+        run: |
+          PREFIX="$(mktemp -d)"
+          HOME_DIR="$(mktemp -d)"
+          BACKUP_FILE="$(mktemp -u).json"
+          export OT_HOME="${HOME_DIR}"
+          export OT_ADMIN_PASSWORD="ci-admin-password-2026"
+
+          npm install -g "./${TARBALL}" --prefix "${PREFIX}"
+          OT_BIN="${PREFIX}/bin/ot"
+
+          "${OT_BIN}" --version
+
+          # Verify port conflict detection when 1392 is already held
+          node -e "const net=require('net'); const s=net.createServer(); s.listen(1392,'0.0.0.0',()=>{}); setTimeout(()=>process.exit(0),4000);" &
+          BLOCKER_PID=$!
+          sleep 1
+          if "${OT_BIN}" start --port 1392; then
+            echo "Expected port conflict failure when port 1392 is occupied"
+            kill "${BLOCKER_PID}" 2>/dev/null || true
+            exit 1
+          fi
+          kill "${BLOCKER_PID}" 2>/dev/null || true
+          wait "${BLOCKER_PID}" 2>/dev/null || true
+
+          # Start on default port 1392
+          "${OT_BIN}" start
+          curl -fsS http://127.0.0.1:1392/api/health | grep -q '"service":"obsidian-telemetry"'
+          curl -fsS http://127.0.0.1:1392/ | grep -q '<title>Obsidian Telemetry'
+
+          "${OT_BIN}" status
+          "${OT_BIN}" restart
+          curl -fsS http://127.0.0.1:1392/api/health | grep -q '"status":"ok"'
+
+          "${OT_BIN}" backup "${BACKUP_FILE}"
+          "${OT_BIN}" stop
+          "${OT_BIN}" restore "${BACKUP_FILE}"
+          "${OT_BIN}" uninstall --yes
+          rm -rf "${PREFIX}" "${HOME_DIR}" "${BACKUP_FILE}" tarball-files.txt "${TARBALL}"
+
+  windows:
+    name: Windows (${{ matrix.node-version }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
       - name: Prettier format check
         run: npm run format:check
+
+      - name: TypeScript type check
+        run: npm run lint
+
+      - name: Oxlint check
+        run: npm run lint:code
 
       - name: Run unit, integration, and component tests
         run: npm test
 
-      - name: Build production frontend bundle
+      - name: Build production client and server bundles
         run: npm run build
+
+      - name: Pack, install in isolated prefix, and verify CLI lifecycle on Windows
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          npm pack
+          $tarball = (Get-ChildItem 'obsidian-telemetry-*.tgz' | Select-Object -First 1).FullName
+          $prefix = Join-Path $env:RUNNER_TEMP ("ot-win-prefix-" + [guid]::NewGuid().ToString('N'))
+          $otHome = Join-Path $env:RUNNER_TEMP ("ot-win-home-" + [guid]::NewGuid().ToString('N'))
+          $backupFile = Join-Path $env:RUNNER_TEMP ("ot-win-backup-" + [guid]::NewGuid().ToString('N') + ".json")
+          New-Item -ItemType Directory -Force -Path $prefix, $otHome | Out-Null
+
+          $env:OT_HOME = $otHome
+          $env:OT_ADMIN_PASSWORD = 'ci-admin-password-2026'
+
+          npm install -g $tarball --prefix $prefix
+          $otCmd = Join-Path $prefix 'ot.cmd'
+          if (-not (Test-Path $otCmd)) { throw "Missing Windows shim at $otCmd" }
+
+          & $otCmd --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $otCmd start
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          $health = Invoke-RestMethod -Uri 'http://127.0.0.1:1392/api/health'
+          if ($health.service -ne 'obsidian-telemetry') { throw "Unexpected health service: $($health.service)" }
+
+          $dash = Invoke-WebRequest -Uri 'http://127.0.0.1:1392/' -UseBasicParsing
+          if ($dash.StatusCode -ne 200) { throw "Dashboard returned HTTP $($dash.StatusCode)" }
+
+          & $otCmd status
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $otCmd restart
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $otCmd backup $backupFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $otCmd stop
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $otCmd restore $backupFile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          & $otCmd uninstall --yes
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+          Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $prefix, $otHome, $backupFile, $tarball
+
+  macos:
+    name: macOS (${{ matrix.node-version }})
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: ['20', '22']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Prettier format check
+        run: npm run format:check
+
+      - name: TypeScript type check
+        run: npm run lint
+
+      - name: Oxlint check
+        run: npm run lint:code
+
+      - name: Run unit, integration, and component tests
+        run: npm test
+
+      - name: Build production client and server bundles
+        run: npm run build
+
+      - name: Pack, install in isolated prefix, and verify CLI lifecycle on macOS
+        run: |
+          npm pack
+          TARBALL="$(ls -1 obsidian-telemetry-*.tgz | head -n1)"
+          PREFIX="$(mktemp -d)"
+          HOME_DIR="$(mktemp -d)"
+          BACKUP_FILE="$(mktemp -u).json"
+          export OT_HOME="${HOME_DIR}"
+          export OT_ADMIN_PASSWORD="ci-admin-password-2026"
+
+          npm install -g "./${TARBALL}" --prefix "${PREFIX}"
+          OT_BIN="${PREFIX}/bin/ot"
+
+          "${OT_BIN}" --version
+          "${OT_BIN}" start
+          curl -fsS http://127.0.0.1:1392/api/health | grep -q '"service":"obsidian-telemetry"'
+          curl -fsS http://127.0.0.1:1392/ | grep -q '<title>Obsidian Telemetry'
+          "${OT_BIN}" status
+          "${OT_BIN}" restart
+          "${OT_BIN}" backup "${BACKUP_FILE}"
+          "${OT_BIN}" stop
+          "${OT_BIN}" restore "${BACKUP_FILE}"
+          "${OT_BIN}" uninstall --yes
+          rm -rf "${PREFIX}" "${HOME_DIR}" "${BACKUP_FILE}" "${TARBALL}"

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 160" width="280" height="160" role="img" aria-labelledby="titleDeployEng descDeployEng">
+  <title id="titleDeployEng">Deployment Engineer Character Card</title>
+  <desc id="descDeployEng">Original vector character automating npm releases, install.sh, install.ps1, Docker Compose, and Kubernetes PVC rollouts.</desc>
+  <style>
+    @media (prefers-reduced-motion: reduce) {
+      .ot-anim { display: none; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="bgDep" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#070A0F" />
+      <stop offset="100%" stop-color="#0F172A" />
+    </linearGradient>
+    <clipPath id="clipDep">
+      <rect x="0" y="0" width="280" height="160" rx="8" />
+    </clipPath>
+  </defs>
+  <g clip-path="url(#clipDep)">
+    <rect width="280" height="160" fill="url(#bgDep)" />
+    <!-- Launch Vector -->
+    <g transform="translate(222, 46)">
+      <polygon points="0,-24 12,8 0,2 -12,8" fill="#0B192C" stroke="#22D3EE" stroke-width="1.6" />
+      <polygon points="-4,10 0,24 4,10" fill="#F59E0B">
+        <animate class="ot-anim" attributeName="opacity" values="1;0.35;1" dur="0.9s" repeatCount="indefinite" />
+      </polygon>
+    </g>
+    <!-- Character Figure -->
+    <g transform="translate(50, 42)">
+      <path d="M 10 88 L 16 54 Q 32 48 48 54 L 54 88 Z" fill="#1E293B" stroke="#22D3EE" stroke-opacity="0.6" stroke-width="1.5" />
+      <circle cx="32" cy="30" r="17" fill="#0F172A" stroke="#22D3EE" stroke-width="1.5" />
+      <rect x="20" y="23" width="24" height="10" rx="4" fill="#070A0F" stroke="#22D3EE" />
+      <circle cx="26" cy="28" r="2" fill="#22D3EE" />
+      <circle cx="38" cy="28" r="2" fill="#10B981" />
+    </g>
+    <text x="132" y="102" fill="#dfe2ee" font-family="ui-sans-serif, system-ui, sans-serif" font-size="13" font-weight="700">Deployment Engineer</text>
+    <text x="132" y="119" fill="#94a3b8" font-family="ui-monospace, monospace" font-size="10">NPM · LINUX · WIN · MAC</text>
+    <rect x="132" y="130" width="114" height="16" rx="3" fill="#0B192C" stroke="#06B6D4" stroke-opacity="0.55" />
+    <text x="139" y="141" fill="#22D3EE" font-family="ui-monospace, monospace" font-size="9">CI MATRIX + K8S</text>
+    <rect x="0.5" y="0.5" width="279" height="159" rx="8" fill="none" stroke="#1E293B" />
+  </g>
+</svg>
